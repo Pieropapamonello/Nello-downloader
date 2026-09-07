@@ -4,6 +4,8 @@ The cgroup watchdog is best effort, not a hard kernel memory limit. It protects
 the bot from sustained growth and releases extractor memory after each job.
 """
 import json
+import logging
+import re
 import os
 from pathlib import Path
 import signal
@@ -69,6 +71,8 @@ def run_youtube_job(opts, url, download=False, info=None, timeout=90):
             if not result_path.exists():
                 raise YouTubeResourceError('Il processo YouTube si è interrotto; download non completato.')
             result = json.loads(result_path.read_text(encoding='utf-8'))
+            for warning in result.get('warnings', []):
+                logging.getLogger(__name__).warning('yt-dlp: %s', warning)
             if 'error' in result:
                 raise RuntimeError(result['error'])
             return result
@@ -81,6 +85,16 @@ def run_youtube_job(opts, url, download=False, info=None, timeout=90):
 def main():
     import yt_dlp
     job = json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'))
+    warnings = []
+    class JobLogger:
+        def debug(self, message):
+            pass
+        def warning(self, message):
+            warnings.append(re.sub(r'https?://\S+', '[URL]', str(message))[:700])
+        def error(self, message):
+            pass
+    job['opts']['logger'] = JobLogger()
+    job['opts']['no_warnings'] = False
     try:
         with yt_dlp.YoutubeDL(job['opts']) as ydl:
             info = (ydl.process_ie_result(job['info'], download=True)
@@ -89,6 +103,7 @@ def main():
             result = {'info': ydl.sanitize_info(info), 'filename': ydl.prepare_filename(info)}
     except Exception as exc:
         result = {'error': str(exc)[:500]}
+    result['warnings'] = warnings[-20:]
     Path(sys.argv[2]).write_text(json.dumps(result), encoding='utf-8')
 
 

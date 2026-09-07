@@ -265,32 +265,15 @@ class SocialMediaDownloader(TikTokMixin, InstagramMixin, FacebookMixin, CobaltMi
                 'Origin': 'https://www.youtube.com',
             })
 
-            # IMPORTANTE (stato 2026): su IP datacenter servono TRE cose:
-            #  1) cookie o po_token per passare il controllo bot (bgutil fornisce il po_token);
-            #  2) un runtime JS (Deno) + solver EJS per risolvere le sfide nsig/signature,
-            #     altrimenti i formati vengono scartati ("Requested format is not available");
-            #  3) un client che NON sia forzato su SABR (il client 'tv' va meglio del 'web').
-            has_yt_cookies = os.path.exists(self.youtube_cookies)
-
-            # Usa Deno come runtime JS per il solver EJS (risolve nsig/signature).
-            # Formato richiesto da yt-dlp: dict {runtime: {config}}.
+            # One client per disposable process; web clients support account cookies.
             opts['js_runtimes'] = {'deno': {}}
-
-            # Un client per tentativo: evita di accumulare player e sfide JS.
-            if attempt == 0:
-                opts['extractor_args'] = {'youtube': {'player_client': ['tv']}}
-                if has_yt_cookies:
-                    opts['cookiefile'] = self.youtube_cookies
-
-            # Attempt 1: client mobile web autenticato di ripiego.
-            elif attempt == 1:
-                opts['extractor_args'] = {'youtube': {'player_client': ['mweb']}}
-                if has_yt_cookies:
-                    opts['cookiefile'] = self.youtube_cookies
-
-            # Attempt 2: Android VR senza cookie.
-            else:
-                opts['extractor_args'] = {'youtube': {'player_client': ['android_vr']}}
+            clients = ('mweb', 'web_safari', 'tv')
+            opts['extractor_args'] = {
+                'youtube': {'player_client': [clients[min(attempt, 2)]]},
+                'youtubepot-bgutilhttp': {'base_url': ['http://127.0.0.1:4416']},
+            }
+            if os.path.exists(self.youtube_cookies):
+                opts['cookiefile'] = self.youtube_cookies
 
         # Facebook
         if 'facebook' in url.lower() or 'fb.' in url.lower():
