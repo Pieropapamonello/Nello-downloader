@@ -2,7 +2,7 @@ services:
   - type: web
     name: nello-downloader
     runtime: docker
-    repo: https://github.com/lamenDino/Nello-downloader
+    repo: https://github.com/Pieropapamonello/Nello-downloader
     branch: main
     plan: free
     region: frankfurt
