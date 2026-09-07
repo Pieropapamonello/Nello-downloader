@@ -262,7 +262,6 @@ class SocialMediaDownloader(TikTokMixin, InstagramMixin, FacebookMixin, CobaltMi
 
             opts['http_headers'].update({
                 'Referer': 'https://www.youtube.com/',
-                'Origin': 'https://www.youtube.com',
             })
 
             # One client per disposable process; web clients support account cookies.
