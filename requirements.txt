@@ -1,0 +1,6 @@
+requests==2.31.0
+aiohttp>=3.9.0
+cloudscraper
+git+https://github.com/yt-dlp/yt-dlp.git@master
+bgutil-ytdlp-pot-provider
+yt-dlp-ejs

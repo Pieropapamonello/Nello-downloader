@@ -1,0 +1,11 @@
+.git
+.venv
+.env*
+*_cookies.txt
+cookies.txt
+*serviceAccount*.json
+firebase_credentials.json
+__pycache__
+*.log
+_qr.txt
+working_proxies.txt
