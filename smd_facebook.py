@@ -13,13 +13,35 @@ from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
 import requests
+from urllib.parse import urlsplit, parse_qs
 
 logger = logging.getLogger(__name__)
+
+
+def facebook_video_id(url):
+    parsed = urlsplit(url)
+    match = re.search(r'/(?:reel|videos)/(?:[^/]+/)?(\d+)(?:/|$)', parsed.path)
+    if match:
+        return match.group(1)
+    value = parse_qs(parsed.query).get('v', [''])[0]
+    return value if value.isdigit() else None
+
+
+def is_facebook_video_url(url):
+    parsed = urlsplit(url)
+    host = (parsed.hostname or '').lower()
+    return ((host == 'fb.watch' or host.endswith('.fb.watch')) or
+            ((host == 'facebook.com' or host.endswith('.facebook.com')) and
+             (facebook_video_id(url) is not None or
+              re.match(r'/(?:reel|reels|videos|watch|share/[rv])(?:/|$)', parsed.path) is not None)))
 
 
 class FacebookMixin:
     async def _facebook_fallback(self, url: str) -> Optional[List[str]]:
         """Fallback for Facebook posts (images) using requests + regex"""
+        if is_facebook_video_url(url):
+            logger.warning('Facebook video extraction failed; refusing image or unrelated HTML media: %s', url)
+            return None
         try:
             headers = {
                 'User-Agent': self.get_random_user_agent(),
@@ -47,6 +69,9 @@ class FacebookMixin:
 
             resp.encoding = 'utf-8'  # evita mojibake (senza, requests decodifica come Latin-1)
             text = resp.text
+            if is_facebook_video_url(resp.url):
+                logger.warning('Facebook resolved to a video; image fallback refused')
+                return None
 
             # --- DETECT VIDEO ---
             # Se il link è esplicitamente un video (controllato dalla presenza di video indicators nel meta), 

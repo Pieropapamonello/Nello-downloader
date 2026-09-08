@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 
 from smd_tiktok import TikTokMixin
 from smd_instagram import InstagramMixin
-from smd_facebook import FacebookMixin
+from smd_facebook import FacebookMixin, facebook_video_id, is_facebook_video_url
 from smd_cobalt import CobaltMixin
 
 
@@ -434,6 +434,8 @@ class SocialMediaDownloader(TikTokMixin, InstagramMixin, FacebookMixin, CobaltMi
         """Estrae info (senza download)"""
         # Nota: rimuoviamo il try/catch interno per permettere a download_video
         # di intercettare errori specifici (es. Unsupported URL)
+        if attempt > 0 and is_facebook_video_url(url) and facebook_video_id(url):
+            url = 'https://www.facebook.com/watch/?v=' + facebook_video_id(url)
         opts = self.get_ydl_opts(url, attempt)
         opts['skip_download'] = True
 
@@ -954,12 +956,22 @@ class SocialMediaDownloader(TikTokMixin, InstagramMixin, FacebookMixin, CobaltMi
                 # conserva l'ultimo info estratto per debug
                 self._last_info = info
                 if not info:
+                    logger.warning('Extractor returned no metadata: platform=%s attempt=%d', platform, attempt + 1)
                     if attempt < self.max_retries - 1:
                         delay = self.retry_delay * (2 ** attempt)
                         await asyncio.sleep(delay)
                         continue
                     # Se finiti tentativi yt-dlp, break e vai ai fallback
                     break 
+
+                if platform == 'facebook' and is_facebook_video_url(clean_url):
+                    expected_id = facebook_video_id(clean_url)
+                    if expected_id and str(info.get('id')) != expected_id:
+                        logger.warning('Facebook returned a different media ID; rejected')
+                        continue
+                    if self._is_playlist_like(info):
+                        logger.warning('Facebook reel returned a playlist; rejected')
+                        continue
 
                 # Uploader/title (fallbacks)
                 uploader = info.get('uploader') or info.get('channel') or info.get('creator') or 'Sconosciuto'
@@ -996,6 +1008,9 @@ class SocialMediaDownloader(TikTokMixin, InstagramMixin, FacebookMixin, CobaltMi
                 # 2) Prova come video singolo
                 file_path = await self.download_with_ytdlp(clean_url, attempt, info=info)
                 if not file_path or not os.path.exists(file_path):
+                    logger.warning('No downloaded file: platform=%s id=%s format=%s size=%s',
+                                   platform, info.get('id'), info.get('format_id'),
+                                   info.get('filesize') or info.get('filesize_approx'))
                     if attempt < self.max_retries - 1:
                         delay = self.retry_delay * (2 ** attempt)
                         await asyncio.sleep(delay)
@@ -1060,6 +1075,10 @@ class SocialMediaDownloader(TikTokMixin, InstagramMixin, FacebookMixin, CobaltMi
         if platform == 'youtube':
             logger.info("YouTube senza durata verificata: fallback bloccati.")
             return {'success': False, 'error': 'YouTube non ha completato il download. Riprova tra poco.'}
+
+        if platform == 'facebook' and is_facebook_video_url(clean_url):
+            logger.warning('Facebook reel unavailable after extraction; no photo fallback: %s', clean_url)
+            return {'success': False, 'error': 'Facebook reel video could not be downloaded'}
 
         # 1. COBALT API (The Magic Bullet for No-Cookie environments)
         # Proviamo Cobalt per tutto (YouTube, Instagram, TikTok, Twitter, Facebook)
