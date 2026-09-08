@@ -10,7 +10,7 @@ import uuid
 from urllib.parse import urlsplit
 
 from aiohttp import web
-from social_downloader import SocialMediaDownloader
+from media_worker import run_media_job
 from wa_media import prepare_video
 VIDEO_EXTS = ('.mp4', '.mov', '.webm', '.mkv', '.avi', '.flv', '.ts')
 
@@ -19,7 +19,7 @@ DOMAINS = ('youtube.com', 'youtu.be', 'facebook.com', 'fb.watch', 'tiktok.com',
            'instagram.com', 'twitter.com', 'x.com', 'reddit.com', 'redd.it', 'twitch.tv')
 
 
-def build_app(token=None, downloader_factory=SocialMediaDownloader):
+def build_app(token=None, downloader_factory=None):
     token = token or os.environ.get('DOWNLOADER_TOKEN', '')
     if len(token) < 32:
         raise ValueError('DOWNLOADER_TOKEN must contain at least 32 characters')
@@ -90,15 +90,16 @@ def build_app(token=None, downloader_factory=SocialMediaDownloader):
             job['directory'] = directory
             job['paths'] = []
             try:
-                dl = downloader_factory()
-                dl.temp_dir = directory.name
-                dl.base_opts['outtmpl'] = os.path.join(directory.name, '%(id)s.%(ext)s')
                 target = body.get('target', '')
-                if target == 'whatsapp':
-                    dl.base_opts['format'] = ('best[ext=mp4][vcodec~="^(avc1|h264)"][acodec!=none]/'
-                                              + dl.base_opts['format'])
-                result = await (dl.download_audio(body['url']) if body.get('kind') == 'audio'
-                                else dl.download_video(body['url']))
+                if downloader_factory is None:
+                    result = await asyncio.to_thread(run_media_job, body, directory.name)
+                else:
+                    # Injected downloader for API contract tests.
+                    dl = downloader_factory()
+                    dl.temp_dir = directory.name
+                    dl.base_opts['outtmpl'] = os.path.join(directory.name, '%(id)s.%(ext)s')
+                    result = await (dl.download_audio(body['url']) if body.get('kind') == 'audio'
+                                    else dl.download_video(body['url']))
                 if result.get('success'):
                     paths = ([result['file_path']] if result.get('file_path') else result.get('files', []))
                     descriptors = []

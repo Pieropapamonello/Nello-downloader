@@ -24,6 +24,19 @@ class YouTubeJobTests(unittest.TestCase):
                 '510000000', '536870912', 'inactive_file 150000000']):
             self.assertFalse(memory_pressure())
 
+    def test_isolated_worker_does_not_launch_nested_process(self):
+        with patch.dict('os.environ', {'NELLO_ISOLATED_MEDIA_WORKER': '1'}), \
+                patch('youtube_job.execute_job', return_value={'info': {'id': 'test'}}), \
+                patch('youtube_job.subprocess.Popen') as launch:
+            self.assertEqual(run_youtube_job({}, 'unused')['info']['id'], 'test')
+            launch.assert_not_called()
+
+    def test_http_server_does_not_load_extractor(self):
+        result = subprocess.run([sys.executable, '-c',
+            'import downloader_service, sys; assert "yt_dlp" not in sys.modules; '
+            'assert "social_downloader" not in sys.modules'], capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_no_launch_under_pressure(self):
         with patch('youtube_job.memory_pressure', return_value=True), patch('youtube_job.subprocess.Popen') as launch:
             with self.assertRaises(YouTubeResourceError):

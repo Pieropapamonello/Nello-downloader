@@ -63,6 +63,14 @@ def stop_job(proc):
 
 
 def run_youtube_job(opts, url, download=False, info=None, timeout=90):
+    if os.environ.get('NELLO_ISOLATED_MEDIA_WORKER') == '1':
+        # The outer supervisor already owns and monitors this process group.
+        result = execute_job({'opts': opts, 'url': url, 'download': download, 'info': info})
+        for warning in result.get('warnings', []):
+            logging.getLogger(__name__).warning('yt-dlp: %s', warning)
+        if 'error' in result:
+            raise RuntimeError(result['error'])
+        return result
     if memory_pressure():
         raise YouTubeResourceError('YouTube sospeso: memoria del server insufficiente. Gli altri bot restano attivi.')
     with tempfile.TemporaryDirectory(prefix='youtube_job_') as directory:
@@ -96,9 +104,8 @@ def run_youtube_job(opts, url, download=False, info=None, timeout=90):
                 stop_job(proc)
 
 
-def main():
+def execute_job(job):
     import yt_dlp
-    job = json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'))
     warnings = []
     class JobLogger:
         def debug(self, message):
@@ -118,7 +125,12 @@ def main():
     except Exception as exc:
         result = {'error': str(exc)[:500]}
     result['warnings'] = warnings[-20:]
-    Path(sys.argv[2]).write_text(json.dumps(result), encoding='utf-8')
+    return result
+
+
+def main():
+    job = json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'))
+    Path(sys.argv[2]).write_text(json.dumps(execute_job(job)), encoding='utf-8')
 
 
 if __name__ == '__main__':
