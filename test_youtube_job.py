@@ -14,9 +14,14 @@ from youtube_job import run_youtube_job, YouTubeResourceError, memory_pressure
 
 class YouTubeJobTests(unittest.TestCase):
     def test_cgroup_pressure(self):
-        with patch.object(Path, 'read_text', side_effect=['490000000', '536870912']):
+        with patch.object(Path, 'read_text', side_effect=['490000000', '536870912', 'inactive_file 0']):
             self.assertTrue(memory_pressure())
-        with patch.object(Path, 'read_text', side_effect=['300000000', '536870912']):
+        with patch.object(Path, 'read_text', side_effect=['300000000', '536870912', 'inactive_file 0']):
+            self.assertFalse(memory_pressure())
+
+    def test_reclaimable_file_cache_is_not_process_memory(self):
+        with patch.object(Path, 'read_text', side_effect=[
+                '510000000', '536870912', 'inactive_file 150000000']):
             self.assertFalse(memory_pressure())
 
     def test_no_launch_under_pressure(self):

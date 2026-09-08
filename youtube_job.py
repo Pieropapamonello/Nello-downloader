@@ -29,7 +29,21 @@ def memory_pressure():
             used = int(Path(used_path).read_text().strip())
             limit = int(Path(limit_path).read_text().strip())
             if 0 < limit < 2 ** 60:
-                return used >= limit - min(64 * 1024 * 1024, limit // 5)
+                reclaimable = 0
+                try:
+                    stats = dict(line.split() for line in
+                                 (Path(used_path).parent / 'memory.stat').read_text().splitlines())
+                    key = 'total_inactive_file' if 'usage_in_bytes' in used_path else 'inactive_file'
+                    reclaimable = max(0, int(stats.get(key, 0)))
+                except (OSError, ValueError):
+                    pass
+                working = used - min(used, reclaimable)
+                pressure = working >= limit - min(64 * 1024 * 1024, limit // 5)
+                if pressure:
+                    logging.getLogger(__name__).warning(
+                        'YouTube memory: total=%d inactive_file=%d working=%d limit=%d',
+                        used, reclaimable, working, limit)
+                return pressure
         except (OSError, ValueError):
             continue
     return False
