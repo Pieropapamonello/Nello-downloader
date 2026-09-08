@@ -266,7 +266,7 @@ class SocialMediaDownloader(TikTokMixin, InstagramMixin, FacebookMixin, CobaltMi
 
             # One client per disposable process; web clients support account cookies.
             opts['js_runtimes'] = {'deno': {}}
-            clients = ('mweb', 'web_safari', 'tv')
+            clients = ('web_safari', 'mweb', 'tv')
             opts['extractor_args'] = {
                 'youtube': {'player_client': [clients[min(attempt, 2)]]},
                 'youtubepot-bgutilhttp': {'base_url': ['http://127.0.0.1:4416']},

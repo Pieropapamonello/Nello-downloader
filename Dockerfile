@@ -13,6 +13,6 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY *.py ./
 COPY start-downloader.sh ./
-ENV DENO_V8_FLAGS=--max-old-space-size=144,--jitless
+ENV DENO_V8_FLAGS=--max-old-space-size=144,--max-semi-space-size=1,--jitless
 EXPOSE 10000
 CMD ["bash", "start-downloader.sh"]
