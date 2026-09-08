@@ -113,7 +113,7 @@ def build_app(token=None, downloader_factory=None):
                             if limit < 1024 * 1024:
                                 raise ValueError('invalid size limit')
                             try:
-                                converted = await asyncio.to_thread(prepare_video, path, max_bytes=limit)
+                                converted = await asyncio.to_thread(prepare_video, path, max_bytes=limit, timeout=300)
                                 os.remove(path)
                                 path = converted
                             except Exception as exc:

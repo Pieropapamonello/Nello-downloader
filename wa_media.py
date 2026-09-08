@@ -52,10 +52,12 @@ def prepare_video(path, timeout=180, max_bytes=16 * 1024 * 1024):
             rate = min(1200000, int(max_bytes * 8 * 0.85 / duration) - audio_rate) if duration > 0 else 800000
             if rate < 64000:
                 raise ValueError('video too long for WhatsApp size limit')
+            side = 480 if rate < 400000 else 640
+            fps = '24' if rate < 400000 else '30'
             cmd += [
-                '-vf', "scale=w='min(640,iw)':h='min(640,ih)':"
+                '-vf', f"scale=w='min({side},iw)':h='min({side},ih)':"
                        'force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1',
-                '-r', '30', '-c:v', 'libx264', '-threads', '1',
+                '-r', fps, '-c:v', 'libx264', '-threads', '1',
                 '-preset', 'ultrafast', '-b:v', str(rate), '-maxrate', str(rate),
                 '-bufsize', str(rate * 2), '-profile:v', 'baseline',
                 '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-ac', '2', '-ar', '48000',

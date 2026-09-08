@@ -44,6 +44,8 @@ async def main():
     request, result_path = map(Path, sys.argv[1:3])
     body = json.loads(request.read_text(encoding='utf-8'))
     dl = SocialMediaDownloader()
+    dl.base_opts['max_filesize'] = 100 * 1024 * 1024
+    dl.base_opts['format_sort'] = ['res:480']
     dl.temp_dir = str(request.parent)
     dl.base_opts['outtmpl'] = str(request.parent / '%(id)s.%(ext)s')
     if body.get('target') == 'whatsapp':
