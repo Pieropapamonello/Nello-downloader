@@ -104,7 +104,38 @@ def run_youtube_job(opts, url, download=False, info=None, timeout=90):
                 stop_job(proc)
 
 
+_pot_provider = None
+
+
+def ensure_pot_provider(opts):
+    """Provider belongs to the disposable worker, never to the HTTP service."""
+    global _pot_provider
+    args = opts.get('extractor_args', {}).get('youtube', {})
+    if (os.environ.get('NELLO_ISOLATED_MEDIA_WORKER') != '1'
+            or args.get('fetch_pot') == ['never']
+            or 'mweb' not in args.get('player_client', [])):
+        return
+    if _pot_provider is not None and _pot_provider.poll() is None:
+        return
+    _pot_provider = subprocess.Popen(
+        ['node', '--max-old-space-size=64', '--max-semi-space-size=1',
+         'build/main.js', '--port', '4416'], cwd='/opt/bgutil/server',
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    import urllib.request
+    for _ in range(50):
+        if _pot_provider.poll() is not None:
+            raise RuntimeError('PO token provider failed to start')
+        try:
+            with urllib.request.urlopen('http://127.0.0.1:4416/ping', timeout=1) as response:
+                if response.status == 200:
+                    return
+        except OSError:
+            time.sleep(0.1)
+    raise RuntimeError('PO token provider startup timed out')
+
+
 def execute_job(job):
+    ensure_pot_provider(job['opts'])
     import yt_dlp
     warnings = []
     class JobLogger:
