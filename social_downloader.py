@@ -281,7 +281,7 @@ class SocialMediaDownloader(TikTokMixin, InstagramMixin, FacebookMixin, CobaltMi
 
         # Facebook
         if 'facebook' in url.lower() or 'fb.' in url.lower():
-            opts['format'] = 'bestvideo[height<=480]+bestaudio/best[height<=480]/best'
+            opts['format'] = 'sd/bestvideo[height<=720][tbr<=500]+bestaudio/best[height<=720]/best'
             opts['http_headers'].update({
                 'Referer': 'https://www.facebook.com/',
                 'Origin': 'https://www.facebook.com',
