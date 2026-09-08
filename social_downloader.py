@@ -271,6 +271,11 @@ class SocialMediaDownloader(TikTokMixin, InstagramMixin, FacebookMixin, CobaltMi
                 'youtube': {'player_client': [clients[min(attempt, 2)]]},
                 'youtubepot-bgutilhttp': {'base_url': ['http://127.0.0.1:4416']},
             }
+            if attempt == 0:
+                # Safari HLS does not need a GVS token. Avoid generating an
+                # unused HTTPS token alongside the JavaScript challenge solver.
+                opts['extractor_args']['youtube']['fetch_pot'] = ['never']
+                opts['format'] = 'best[protocol^=m3u8]/best'
             if os.path.exists(self.youtube_cookies):
                 opts['cookiefile'] = self.youtube_cookies
 
