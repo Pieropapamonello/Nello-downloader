@@ -798,6 +798,16 @@ class SocialMediaDownloader(TikTokMixin, InstagramMixin, FacebookMixin, CobaltMi
                     # Avoid two additional player/JS challenge extractions.
                     info2 = (ydl.process_ie_result(dict(info), download=True) if info
                              else ydl.extract_info(url, download=True))
+                    candidates = [info2.get('filepath'), ydl.prepare_filename(info2)]
+                    candidates.extend(d.get('filepath') for d in info2.get('requested_downloads', []))
+                    for candidate in candidates:
+                        if candidate and os.path.isfile(candidate):
+                            return candidate
+                    logger.warning('yt-dlp produced no expected file; expected=%s actual=%s',
+                                   [os.path.basename(c) for c in candidates if c],
+                                   [(n, os.path.getsize(os.path.join(self.temp_dir, n)))
+                                    for n in os.listdir(self.temp_dir)
+                                    if not n.endswith('.json') and os.path.isfile(os.path.join(self.temp_dir, n))])
                     return ydl.prepare_filename(info2)
 
             filename = await loop.run_in_executor(None, _download)

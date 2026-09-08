@@ -53,6 +53,10 @@ class TikTokMixin:
             r.raise_for_status()
             r.encoding = 'utf-8'  # TikTok è UTF-8; senza, requests usa Latin-1 -> caratteri strani
             html = r.text
+            from urllib.parse import urlsplit
+            if '/photo/' not in urlsplit(r.url).path:
+                logger.warning('TikTok resolved to a video or unknown page; photo fallback refused')
+                return files
 
             # Dump HTML solo in debug (evita di sporcare il filesystem in produzione)
             if self.debug:
@@ -242,53 +246,11 @@ class TikTokMixin:
                                 return True
                     return False
 
-                # Ripiego: vecchia ricerca larga (se non trovo imagePost.images)
-                def recursive_find_images(d):
-                    if isinstance(d, dict):
-                        img = None
-                        if isinstance(d.get('imageURL'), dict) and d['imageURL'].get('urlList'):
-                            img = d['imageURL']['urlList']
-                        elif isinstance(d.get('displayImage'), dict) and d['displayImage'].get('urlList'):
-                            img = d['displayImage']['urlList']
-                        if img:
-                            urls.append(img[0])
-                        for k, v in d.items():
-                            recursive_find_images(v)
-                    elif isinstance(d, list):
-                        for i in d:
-                            recursive_find_images(i)
-
-                if not find_image_post(data):
-                    recursive_find_images(data)
+                find_image_post(data)
                 logger.info(f"TikTok Fallback: JSON blob {idx_json} processed, total urls: {len(urls)}")
             except Exception as e:
                 logger.warning(f"TikTok Fallback: JSON blob {idx_json} parse error: {e}")
                 pass
-
-        # 2) Regex generico immagini
-        # Cerca URL che sembrano immagini tiktok
-        # Spesso sono https://p16-sign-va.tiktokcdn.com/...o qualcosa del genere
-        if not urls:
-            logger.info("TikTok Fallback: No JSON data found, trying regex...")
-            # Pattern broad per URL immagini dentro stringhe
-            pattern = re.compile(r'"(https?://[^"\s]+\.(?:jpeg|jpg|png|webp)[^"]*)"', re.IGNORECASE)
-            matches = pattern.findall(html)
-            # Filtra per domini tiktok se possibile, o prendi tutto
-            for m in matches:
-                # Decodifica unicode escape se presente
-                m_dec = m.encode().decode('unicode_escape')
-                if 'tiktokcdn' in m_dec or 'tiktok' in m_dec:
-                    urls.append(m_dec)
-
-        # 3) Meta og:image come ultima risorsa
-        if not urls:
-            meta_patterns = [
-                re.compile(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']', re.IGNORECASE),
-                re.compile(r'<meta[^>]+name=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']', re.IGNORECASE),
-            ]
-            for mp in meta_patterns:
-                mm = mp.findall(html)
-                urls.extend(mm)
 
         return _dedupe(urls)
 
