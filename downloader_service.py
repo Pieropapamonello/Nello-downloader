@@ -11,7 +11,7 @@ from urllib.parse import urlsplit
 
 from aiohttp import web, ClientSession, ClientTimeout
 from cookie_health import (PLATFORMS, MAX_COOKIE_BYTES, read_content, inspect_content,
-                           validate_upload, install_live, platform_for_url)
+                           validate_upload, install_live, platform_for_url, ISSUE_PRIORITY)
 from media_worker import run_media_job
 from wa_media import prepare_video
 VIDEO_EXTS = ('.mp4', '.mov', '.webm', '.mkv', '.avi', '.flv', '.ts')
@@ -178,7 +178,7 @@ def build_app(token=None, downloader_factory=None):
                 if platform and cookie_version == inspect_content(read_content(platform), platform)['version']:
                     if result.get('success'):
                         auth_issues.pop(platform, None)
-                    elif result.get('auth_issue') in ('session_rejected', 'access_check', 'login_required'):
+                    elif result.get('auth_issue') in ISSUE_PRIORITY:
                         auth_issues[platform] = {'version': cookie_version, 'reason': result['auth_issue']}
                 log.info('Job %s complete: success=%s url=%s', ident, result.get('success'), body['url'])
             except Exception as exc:

@@ -190,16 +190,22 @@ class SocialMediaDownloader(TikTokMixin, InstagramMixin, FacebookMixin, CobaltMi
             return None
         cookies: Dict[str, str] = {}
         try:
-            with open(path, 'r', encoding='utf-8') as fh:
-                for line in fh:
-                    line = line.strip()
-                    if not line or line.startswith('#'):
-                        continue
-                    parts = line.split('\t')
-                    if len(parts) >= 7:
-                        name = parts[5]
-                        value = parts[6]
-                        cookies[name] = value
+            content = None
+            # yt-dlp may rewrite its jar after an unsuccessful authenticated request.
+            # Independent fallbacks must use the administrator's original session.
+            if os.path.basename(path).startswith('managed_'):
+                from cookie_health import read_content, PLATFORMS
+                platform = os.path.basename(path).removeprefix('managed_').split('_')[0]
+                if platform in PLATFORMS:
+                    content = read_content(platform)
+            if content is None:
+                with open(path, 'r', encoding='utf-8') as fh:
+                    content = fh.read()
+            import io
+            jar = http.cookiejar.MozillaCookieJar()
+            # Standard parser handles HttpOnly records and ignores expired cookies.
+            jar._really_load(io.StringIO(content), path, True, False)
+            cookies = {cookie.name: cookie.value for cookie in jar}
         except Exception:
             return None
         return cookies or None

@@ -32,6 +32,7 @@ class InstagramMixin:
         Esegue chiamate bloccanti (requests), da eseguire in executor.
         """
         files: List[str] = []
+        self._instagram_access_issue = None
         try:
             # Estrai shortcode
             # es: https://www.instagram.com/p/DTvEEVVCO7I/
@@ -69,14 +70,23 @@ class InstagramMixin:
                 logger.warning("Instagram API: manca 'sessionid' nei cookie -> sessione non loggata (cookie probabilmente scaduti)")
 
             r = requests.get(api_url, headers=headers, cookies=cookies, timeout=15, proxies=self.proxy_dict)
-            if r.status_code != 200:
-                if r.status_code in (401, 403, 429):
-                    logger.warning(f"Instagram API: status {r.status_code} -> cookie Instagram probabilmente SCADUTI/invalidi. Rigenera INSTAGRAM_COOKIES.")
-                else:
-                    logger.warning(f"Instagram API: failed with status {r.status_code}")
+            from cookie_health import response_access_issue
+            try:
+                data = r.json()
+            except ValueError:
+                data = {}
+            issue = response_access_issue(r.status_code, r.url, data)
+            if issue:
+                self._instagram_access_issue = issue
+                logger.warning('Instagram access diagnostic: %s (HTTP %s)', issue, r.status_code)
+                return []
+            if r.status_code != 200 or not isinstance(data, dict):
+                logger.warning('Instagram API: unexpected response status=%s', r.status_code)
+                return []
+            if not data:
+                logger.warning('Instagram API: non-JSON response without explicit authentication reason')
                 return []
 
-            data = r.json()
             items = data.get('items', [])
             if not items:
                 logger.warning("Instagram API: no items in response")
@@ -162,6 +172,8 @@ class InstagramMixin:
         Fallback per post Instagram (foto/carousel) quando non ci sono formati video.
         Scarica la pagina HTML, estrae immagini e le salva.
         """
+        if getattr(self, '_instagram_access_issue', None):
+            return []  # Do not repeat requests after an explicit access restriction.
         files: List[str] = []
         found_description = ""
         self.last_fallback_title = None

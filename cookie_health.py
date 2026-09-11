@@ -102,22 +102,63 @@ def platform_for_url(url):
     return {'youtu.be': 'youtube', 'fb.watch': 'facebook'}.get(host)
 
 
+ISSUE_PRIORITY = {'login_required': 1, 'session_rejected': 2, 'access_denied': 3,
+                  'rate_limited': 4, 'access_check': 5, 'account_restricted': 6}
+
+
+def classify_access(text):
+    text = str(text).lower()
+    for issue in ISSUE_PRIORITY:
+        if text.startswith('instagram access diagnostic: ' + issue + ' '):
+            return issue
+    patterns = {
+        'account_restricted': ('account_restricted', 'feedback_required', 'account is suspended',
+                               'account has been suspended', 'account is disabled',
+                               'account has been disabled', 'account is temporarily locked',
+                               'account has been locked', 'account has been restricted',
+                               'added a restriction to your account', 'cannot create new sessions'),
+        'access_check': ('challenge_required', 'checkpoint_required', 'checkpoint_challenge_required',
+                         'confirm your identity', 'verify your identity', 'confirm you?re not a bot',
+                         "confirm you're not a bot", 'consent_required'),
+        'rate_limited': ('rate_limited', 'too many requests', 'please wait a few minutes before you try again'),
+        'access_denied': ('access_denied',),
+        'session_rejected': ('cookies are no longer valid', 'cookies have expired', 'session has expired',
+                             'invalid session', 'login_required'),
+        'login_required': ('redirected to the login page', 'login required', 'log in to access',
+                           'not logged in', 'cookies scaduti', 'cookie scaduti'),
+    }
+    for issue, phrases in patterns.items():
+        if any(phrase in text for phrase in phrases):
+            return issue
+    return None
+
+
+def response_access_issue(status, url, payload=None):
+    # Inspect only known response fields and redirect paths; do not log bodies or URLs.
+    payload = payload if isinstance(payload, dict) else {}
+    text = ' '.join(str(payload.get(key, ''))[:1000] for key in ('message', 'error_type', 'error_title', 'feedback_message'))
+    issue = classify_access(text)
+    if issue:
+        return issue
+    path = urlsplit(url).path.lower()
+    if payload.get('challenge') or payload.get('checkpoint_url') or '/challenge/' in path or '/checkpoint/' in path:
+        return 'access_check'
+    if status == 429:
+        return 'rate_limited'
+    if status == 401 or '/accounts/login' in path:
+        return 'session_rejected'
+    if status == 403:
+        return 'access_denied'
+    return None
+
+
 class AuthDiagnostics(logging.Handler):
-    """Keep a reason code only. Anonymous attempt errors matter only if the job fails."""
+    """Keep the most specific reason code, with no response or cookie content."""
     def __init__(self):
         super().__init__(logging.WARNING)
         self.issue = None
 
     def emit(self, record):
-        text = record.getMessage().lower()
-        if any(s in text for s in ('cookies are no longer valid', 'cookies have expired',
-                                   'session has expired', 'invalid session', 'login_required')):
-            self.issue = 'session_rejected'
-        elif self.issue != 'session_rejected':
-            if any(s in text for s in ('confirm you’re not a bot', "confirm you're not a bot",
-                                       'challenge_required', 'checkpoint_required')):
-                self.issue = 'access_check'
-            elif self.issue is None and any(s in text for s in (
-                    'redirected to the login page', 'login required', 'log in to access',
-                    'not logged in', 'cookies scaduti', 'cookie scaduti')):
-                self.issue = 'login_required'
+        issue = classify_access(record.getMessage())
+        if issue and ISSUE_PRIORITY[issue] > ISSUE_PRIORITY.get(self.issue, 0):
+            self.issue = issue
