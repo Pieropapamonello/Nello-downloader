@@ -9,7 +9,9 @@ import time
 import uuid
 from urllib.parse import urlsplit
 
-from aiohttp import web
+from aiohttp import web, ClientSession, ClientTimeout
+from cookie_health import (PLATFORMS, MAX_COOKIE_BYTES, read_content, inspect_content,
+                           validate_upload, install_live, platform_for_url)
 from media_worker import run_media_job
 from wa_media import prepare_video
 VIDEO_EXTS = ('.mp4', '.mov', '.webm', '.mkv', '.avi', '.flv', '.ts')
@@ -25,6 +27,48 @@ def build_app(token=None, downloader_factory=None):
         raise ValueError('DOWNLOADER_TOKEN must contain at least 32 characters')
     jobs = {}
     queue = asyncio.Queue(maxsize=8)
+    auth_issues = {}
+    cookie_lock = asyncio.Lock()
+
+    async def cookie_status(request):
+        statuses = {}
+        for platform in PLATFORMS:
+            item = inspect_content(read_content(platform), platform)
+            issue = auth_issues.get(platform)
+            if issue and issue['version'] == item['version']:
+                item['issue'] = issue['reason']
+            statuses[platform] = item
+        return web.json_response({'platforms': statuses})
+
+    async def update_cookie(request):
+        platform = request.match_info['platform']
+        if platform not in PLATFORMS:
+            raise web.HTTPNotFound()
+        try:
+            body = await request.json()
+            content = validate_upload(body.get('content'), platform)
+        except (ValueError, AttributeError, TypeError):
+            return web.json_response({'error': 'File non valido, piattaforma errata o sessione assente/scaduta. Esporta cookie Netscape dopo il login.'}, status=400)
+        key = os.getenv('COOKIE_RENDER_API_KEY')
+        service = os.getenv('RENDER_SERVICE_ID')
+        if not key or not service:
+            return web.json_response({'error': 'Salvataggio persistente del downloader non configurato.'}, status=503)
+        async with cookie_lock:
+            try:
+                async with ClientSession(timeout=ClientTimeout(total=30)) as session:
+                    async with session.put(
+                        f'https://api.render.com/v1/services/{service}/secret-files/{platform.upper()}_COOKIES',
+                        headers={'Authorization': 'Bearer ' + key}, json={'content': content}
+                    ) as response:
+                        if response.status not in (200, 201, 204):
+                            log.warning('Cookie persistence failed: platform=%s status=%s', platform, response.status)
+                            return web.json_response({'error': 'Render non ha salvato i cookie. Riprova; se persiste, verifica la chiave API Render.'}, status=502)
+                install_live(platform, content)
+                auth_issues.pop(platform, None)
+            except Exception as exc:
+                log.warning('Cookie update failed: platform=%s type=%s', platform, type(exc).__name__)
+                return web.json_response({'error': 'Aggiornamento non confermato. Riprova.'}, status=502)
+        return web.json_response({'ok': True, 'persistent': True})
 
     @web.middleware
     async def authenticate(request, handler):
@@ -89,6 +133,8 @@ def build_app(token=None, downloader_factory=None):
             directory = tempfile.TemporaryDirectory(prefix='media_job_')
             job['directory'] = directory
             job['paths'] = []
+            platform = platform_for_url(body['url'])
+            cookie_version = inspect_content(read_content(platform), platform)['version'] if platform else None
             try:
                 target = body.get('target', '')
                 if downloader_factory is None:
@@ -129,6 +175,11 @@ def build_app(token=None, downloader_factory=None):
                     result['media'] = descriptors
                     result['_delivery_prepared'] = target in ('whatsapp', 'discord')
                 job['result'] = result
+                if platform and cookie_version == inspect_content(read_content(platform), platform)['version']:
+                    if result.get('success'):
+                        auth_issues.pop(platform, None)
+                    elif result.get('auth_issue') in ('session_rejected', 'access_check', 'login_required'):
+                        auth_issues[platform] = {'version': cookie_version, 'reason': result['auth_issue']}
                 log.info('Job %s complete: success=%s url=%s', ident, result.get('success'), body['url'])
             except Exception as exc:
                 log.exception('Job %s failed', ident)
@@ -152,10 +203,12 @@ def build_app(token=None, downloader_factory=None):
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
 
-    app = web.Application(middlewares=[authenticate], client_max_size=16384)
+    app = web.Application(middlewares=[authenticate], client_max_size=MAX_COOKIE_BYTES * 2)
     async def health(request):
         return web.json_response({'status': 'ok', 'queued': queue.qsize()})
     app.add_routes([web.get('/healthz', health), web.post('/jobs', submit),
+                    web.get('/admin/cookies', cookie_status),
+                    web.put('/admin/cookies/{platform}', update_cookie),
                     web.get('/jobs/{ident}', status), web.delete('/jobs/{ident}', remove),
                     web.get('/jobs/{ident}/files/{index}', media)])
     app.cleanup_ctx.append(lifecycle)

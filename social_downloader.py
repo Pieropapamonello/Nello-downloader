@@ -49,6 +49,15 @@ class SocialMediaDownloader(TikTokMixin, InstagramMixin, FacebookMixin, CobaltMi
 
         # Funzione helper per risolvere i path dei cookie (Supporto Render Secret Files & Env Vars)
         def resolve_cookie_path(filename, env_var_names=None):
+            from cookie_health import PLATFORMS, read_content
+            platform = filename.split('_')[0]
+            if platform in PLATFORMS:
+                content = read_content(platform)
+                if content:
+                    path = os.path.join(self.temp_dir, 'managed_' + filename)
+                    with open(path, 'w', encoding='utf-8') as output:
+                        output.write(content)
+                    return path
             # 1. Cerca PRIMA nella directory corrente (git repo) per permettere l'override
             # Questo permette di fixare i cookie semplicemente pushando un nuovo file, ignorando i secret vecchi
             local_path = os.path.join(os.path.dirname(__file__), filename)

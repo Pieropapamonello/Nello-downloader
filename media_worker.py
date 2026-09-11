@@ -41,6 +41,9 @@ async def main():
     import logging
     from social_downloader import SocialMediaDownloader
     logging.basicConfig(level=logging.INFO)
+    from cookie_health import AuthDiagnostics
+    diagnostics = AuthDiagnostics()
+    logging.getLogger().addHandler(diagnostics)
     request, result_path = map(Path, sys.argv[1:3])
     body = json.loads(request.read_text(encoding='utf-8'))
     dl = SocialMediaDownloader()
@@ -53,6 +56,8 @@ async def main():
                                  + dl.base_opts['format'])
     result = await (dl.download_audio(body['url']) if body.get('kind') == 'audio'
                     else dl.download_video(body['url']))
+    if not result.get('success') and diagnostics.issue:
+        result['auth_issue'] = diagnostics.issue
     result_path.write_text(json.dumps(result), encoding='utf-8')
 
 

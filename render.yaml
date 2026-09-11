@@ -13,3 +13,5 @@ services:
         generateValue: true
       - key: PYTHONUNBUFFERED
         value: "1"
+      - key: COOKIE_RENDER_API_KEY
+        sync: false
