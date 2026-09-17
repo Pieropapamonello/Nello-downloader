@@ -301,10 +301,11 @@ class SocialMediaDownloader(TikTokMixin, InstagramMixin, FacebookMixin, CobaltMi
             from yt_dlp.networking.impersonate import ImpersonateTarget
             opts['impersonate'] = ImpersonateTarget.from_str('chrome-99')
             opts['format'] = 'sd/bestvideo[height<=720][tbr<=500]+bestaudio/best[height<=720]/best'
-            opts['http_headers'].update({
+            # Let curl_cffi supply headers consistent with its browser profile;
+            # the random Chrome/120 header above contradicts Chrome/99 TLS.
+            opts['http_headers'] = {
                 'Referer': 'https://www.facebook.com/',
-                'Origin': 'https://www.facebook.com',
-            })
+            }
             
             # Facebook è difficile. 
             # Attempt 0: No Cookies (Public access)

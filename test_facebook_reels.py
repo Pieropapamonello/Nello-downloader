@@ -13,6 +13,7 @@ class FacebookReelTests(unittest.IsolatedAsyncioTestCase):
         options = dl.get_ydl_opts('https://www.facebook.com/reel/123', 0)
         self.assertEqual(str(options['impersonate']), 'chrome-99')
         self.assertNotIn('cookiefile', options)
+        self.assertNotIn('User-Agent', options['http_headers'])
 
     async def test_parse_failure_reaches_authenticated_attempt_once(self):
         dl = SocialMediaDownloader.__new__(SocialMediaDownloader)
