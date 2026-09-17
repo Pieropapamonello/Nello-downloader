@@ -1083,6 +1083,10 @@ class SocialMediaDownloader(TikTokMixin, InstagramMixin, FacebookMixin, CobaltMi
                     logger.warning("Bot detection! Breaking to shortcuts.")
                     break # break to safe fallbacks
                 if 'cannot parse' in err or 'parse' in err:
+                    if platform == 'facebook' and attempt == 0 and self.max_retries > 1:
+                        logger.info('Facebook anonymous parsing failed; trying authenticated extraction once')
+                        await asyncio.sleep(self.retry_delay)
+                        continue
                     break
                 if 'does not pass match_filter' in err:
                     return {'success': False, 'error': '⚠️ Questo video è troppo lungo. Scarico solo YouTube Shorts (max 120s).'}

@@ -4,6 +4,19 @@ from social_downloader import SocialMediaDownloader
 from smd_facebook import FacebookMixin, is_facebook_video_url, facebook_video_id
 
 class FacebookReelTests(unittest.IsolatedAsyncioTestCase):
+    async def test_parse_failure_reaches_authenticated_attempt_once(self):
+        dl = SocialMediaDownloader.__new__(SocialMediaDownloader)
+        dl.max_retries = 3
+        dl.retry_delay = 0
+        dl.extract_info = AsyncMock(side_effect=RuntimeError('Cannot parse data'))
+        dl.download_with_cobalt = AsyncMock()
+        dl._facebook_fallback = AsyncMock()
+        result = await dl.download_video('https://www.facebook.com/reel/123')
+        self.assertFalse(result['success'])
+        self.assertEqual(dl.extract_info.await_count, 2)
+        dl.download_with_cobalt.assert_not_awaited()
+        dl._facebook_fallback.assert_not_awaited()
+
     def test_video_routes_and_photo_routes(self):
         for url in ['https://www.facebook.com/reel/586205726927663',
                     'https://www.facebook.com/watch/?v=123',
