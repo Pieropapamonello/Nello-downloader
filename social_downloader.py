@@ -296,6 +296,10 @@ class SocialMediaDownloader(TikTokMixin, InstagramMixin, FacebookMixin, CobaltMi
 
         # Facebook
         if 'facebook' in url.lower() or 'fb.' in url.lower():
+            # Facebook's authenticated endpoints may reject the default HTTP
+            # fingerprint even with valid cookies (yt-dlp issue 15161).
+            from yt_dlp.networking.impersonate import ImpersonateTarget
+            opts['impersonate'] = ImpersonateTarget.from_str('chrome-99')
             opts['format'] = 'sd/bestvideo[height<=720][tbr<=500]+bestaudio/best[height<=720]/best'
             opts['http_headers'].update({
                 'Referer': 'https://www.facebook.com/',
