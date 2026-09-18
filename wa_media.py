@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 @limited_media
-def prepare_video(path, timeout=180, max_bytes=16 * 1024 * 1024):
+def prepare_video(path, timeout=180, max_bytes=16 * 1024 * 1024, subtitle_path=None):
     """Return a new H.264/AAC MP4; leave the source intact on failure.
 
     Remux compatible streams without encoding. Otherwise use a lightweight
@@ -35,7 +35,7 @@ def prepare_video(path, timeout=180, max_bytes=16 * 1024 * 1024):
                       and max(video.get('width', 0), video.get('height', 0)) <= 1920)
         audio_compatible = not audio or (audio.get('codec_name') == 'aac'
                                         and audio.get('channels', 0) <= 2)
-        copy_streams = compatible and os.path.getsize(path) <= max_bytes * 0.95
+        copy_streams = compatible and os.path.getsize(path) <= max_bytes * 0.95 and not subtitle_path
         cmd = [
             'ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error',
             '-xerror', '-y', '-threads', '1', '-filter_threads', '1',
@@ -54,9 +54,15 @@ def prepare_video(path, timeout=180, max_bytes=16 * 1024 * 1024):
                 raise ValueError('video too long for WhatsApp size limit')
             side = 360 if rate < 400000 else 640
             fps = '20' if rate < 400000 else '30'
+            filters = (f"fps={fps},scale=w='min({side},iw)':h='min({side},ih)':"
+                       'force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1')
+            if subtitle_path:
+                # Fixed filename plus cwd avoids filter escaping and path injection.
+                if os.path.basename(subtitle_path) != 'italian.srt' or os.path.dirname(os.path.abspath(subtitle_path)) != os.path.dirname(os.path.abspath(path)):
+                    raise ValueError('subtitle file outside media directory')
+                filters += ",subtitles=italian.srt:force_style='FontName=DejaVu Sans,FontSize=18,Outline=2,Shadow=0,MarginV=24'"
             cmd += [
-                '-vf', f"fps={fps},scale=w='min({side},iw)':h='min({side},ih)':"
-                       'force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1',
+                '-vf', filters,
                 '-r', fps, '-c:v', 'libx264', '-threads', '1',
                 '-preset', 'ultrafast', '-b:v', str(rate), '-maxrate', str(rate),
                 '-bufsize', str(rate * 2), '-profile:v', 'baseline',
@@ -68,8 +74,24 @@ def prepare_video(path, timeout=180, max_bytes=16 * 1024 * 1024):
                     video.get('codec_name'), (audio or {}).get('codec_name'),
                     video.get('width'), video.get('height'))
         cmd += ['-movflags', '+faststart', output]
-        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
-                       timeout=max(1, timeout - (time.monotonic() - started)))
+        if subtitle_path:
+            from youtube_job import memory_pressure, stop_job
+            proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                    cwd=os.path.dirname(os.path.abspath(path)),
+                                    start_new_session=os.name == 'posix')
+            try:
+                while proc.poll() is None:
+                    if memory_pressure() or time.monotonic() - started >= timeout:
+                        raise TimeoutError('optional subtitle encode budget reached')
+                    time.sleep(.1)
+                if proc.returncode:
+                    raise ValueError('subtitle encode failed')
+            finally:
+                if proc.poll() is None:
+                    stop_job(proc)
+        else:
+            subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                           timeout=max(1, timeout - (time.monotonic() - started)))
         if os.path.getsize(output) == 0:
             raise ValueError('empty converted video')
         if os.path.getsize(output) > max_bytes:

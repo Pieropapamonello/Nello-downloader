@@ -30,6 +30,29 @@ completati scadono dopo 20 minuti. La separazione della memoria non garantisce
 che YouTube accetti ogni richiesta: cookie e blocchi della piattaforma restano
 possibili cause di errore, registrate nei log.
 
+## Sottotitoli italiani gratuiti
+
+Il downloader usa le tracce disponibili per video singoli fino a 180 secondi,
+solo quando i metadati della traccia audio o dei sottotitoli originali indicano
+inglese. Un titolo inglese o una traduzione inglese non bastano. Se la lingua
+non e verificabile, il video resta invariato. Su TikTok viene conservata la lingua
+delle tracce ASR, distinguendole da quelle MT tradotte.
+
+La traccia italiana del social ha priorita. Altrimenti le battute inglesi
+vengono tradotte tramite il solo endpoint gratuito Get di MyMemory (nessuna
+chiave, abbonamento o API a pagamento). Il servizio dichiara 5000 caratteri al
+giorno per uso anonimo: <https://mymemory.translated.net/doc/usagelimits.php>.
+La richiesta invia solo il testo dei sottotitoli, mai cookie o audio.
+Per ciascun video sono ammessi fino a 4000 caratteri e 300 battute; una quota
+esaurita, un errore o tempi non allineabili lasciano il video originale.
+
+I sottotitoli vengono impressi con FFmpeg (H.264/AAC, un thread, massimo 640px).
+Ricerca/traduzione ha un budget separato di 60 secondi, conversione di 150 secondi;
+la pressione della memoria interrompe soltanto questa elaborazione opzionale.
+Non viene installato un modello di riconoscimento vocale su Render Free.
+I video senza tracce non vengono trascritti. L'esito e nei log e nel campo API
+`subtitles`: `burned_it`, `unavailable`, `skipped_resource_or_encoding`.
+
 ## Verifica locale
 
 ```sh

@@ -14,6 +14,7 @@ from cookie_health import (PLATFORMS, MAX_COOKIE_BYTES, read_content, inspect_co
                            validate_upload, install_live, platform_for_url, ISSUE_PRIORITY)
 from media_worker import run_media_job
 from wa_media import prepare_video
+from subtitles import prepare_subtitles
 VIDEO_EXTS = ('.mp4', '.mov', '.webm', '.mkv', '.avi', '.flv', '.ts')
 
 log = logging.getLogger(__name__)
@@ -147,6 +148,14 @@ def build_app(token=None, downloader_factory=None):
                     result = await (dl.download_audio(body['url']) if body.get('kind') == 'audio'
                                     else dl.download_video(body['url']))
                 if result.get('success'):
+                    subtitle_meta = result.pop('_subtitle_meta', None)
+                    subtitle_path = None
+                    if subtitle_meta:
+                        try:
+                            subtitle_path = await asyncio.to_thread(prepare_subtitles, subtitle_meta, directory.name)
+                        except Exception as exc:
+                            log.info('Optional subtitles skipped: %s', type(exc).__name__)
+                    result['subtitles'] = 'unavailable' if not subtitle_path else 'pending'
                     paths = ([result['file_path']] if result.get('file_path') else result.get('files', []))
                     descriptors = []
                     for path in paths:
@@ -154,7 +163,19 @@ def build_app(token=None, downloader_factory=None):
                         if not Path(path).is_relative_to(Path(directory.name).resolve()):
                             raise ValueError('media outside job directory')
                         document = False
-                        if target in ('whatsapp', 'discord') and Path(path).suffix.lower() in VIDEO_EXTS:
+                        is_video = Path(path).suffix.lower() in VIDEO_EXTS
+                        if subtitle_path and is_video and len(paths) == 1:
+                            limit = min(max(int(body.get('max_bytes', 16 * 1024 * 1024)), 1024 * 1024), 50 * 1024 * 1024)
+                            try:
+                                converted = await asyncio.to_thread(prepare_video, path, max_bytes=limit,
+                                                                   timeout=150, subtitle_path=subtitle_path)
+                                os.remove(path)
+                                path = converted
+                                result['subtitles'] = 'burned_it'
+                            except Exception as exc:
+                                result['subtitles'] = 'skipped_resource_or_encoding'
+                                log.info('Optional subtitle encode skipped: %s', type(exc).__name__)
+                        if target in ('whatsapp', 'discord') and is_video and result['subtitles'] != 'burned_it':
                             limit = min(int(body.get('max_bytes', 16 * 1024 * 1024)), 50 * 1024 * 1024)
                             if limit < 1024 * 1024:
                                 raise ValueError('invalid size limit')
@@ -180,7 +201,7 @@ def build_app(token=None, downloader_factory=None):
                         auth_issues.pop(platform, None)
                     elif result.get('auth_issue') in ISSUE_PRIORITY:
                         auth_issues[platform] = {'version': cookie_version, 'reason': result['auth_issue']}
-                log.info('Job %s complete: success=%s url=%s', ident, result.get('success'), body['url'])
+                log.info('Job %s complete: success=%s subtitles=%s url=%s', ident, result.get('success'), result.get('subtitles'), body['url'])
             except Exception as exc:
                 log.exception('Job %s failed', ident)
                 job['result'] = {'success': False, 'error': type(exc).__name__}

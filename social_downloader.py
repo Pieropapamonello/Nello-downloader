@@ -459,6 +459,10 @@ class SocialMediaDownloader(TikTokMixin, InstagramMixin, FacebookMixin, CobaltMi
             url = 'https://www.facebook.com/watch/?v=' + facebook_video_id(url)
         opts = self.get_ydl_opts(url, attempt)
         opts['skip_download'] = True
+        # Extract caption metadata with the existing page request, not a second download.
+        opts['writesubtitles'] = True
+        opts['writeautomaticsub'] = True
+        opts['subtitleslangs'] = ['en.*', 'eng.*', 'it.*', 'ita.*']
 
         loop = asyncio.get_event_loop()
 
@@ -467,6 +471,9 @@ class SocialMediaDownloader(TikTokMixin, InstagramMixin, FacebookMixin, CobaltMi
             if self.detect_platform(url) == 'youtube':
                 return run_youtube_job(opts, url)['info']
             with yt_dlp.YoutubeDL(opts) as ydl:
+                if self.detect_platform(url) == 'tiktok':
+                    from tiktok_captions import TikTokCaptionsIE
+                    ydl.add_info_extractor(TikTokCaptionsIE())
                 return ydl.extract_info(url, download=False)
 
         return await loop.run_in_executor(None, _extract)
@@ -1052,6 +1059,7 @@ class SocialMediaDownloader(TikTokMixin, InstagramMixin, FacebookMixin, CobaltMi
                         continue
                     break # Vai ai fallback
 
+                self._subtitle_source_info = info
                 return {
                     'success': True,
                     'type': 'video',

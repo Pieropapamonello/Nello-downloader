@@ -58,6 +58,12 @@ async def main():
                     else dl.download_video(body['url']))
     if not result.get('success') and diagnostics.issue:
         result['auth_issue'] = diagnostics.issue
+    if result.get('success') and result.get('type') == 'video' and body.get('kind') != 'audio':
+        from subtitles import caption_metadata
+        try:
+            result['_subtitle_meta'] = caption_metadata(getattr(dl, '_subtitle_source_info', None))
+        except Exception:
+            logging.info('Subtitle metadata unavailable; preserving downloaded video')
     result_path.write_text(json.dumps(result), encoding='utf-8')
 
 
