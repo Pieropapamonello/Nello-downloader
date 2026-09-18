@@ -946,6 +946,10 @@ class SocialMediaDownloader(TikTokMixin, InstagramMixin, FacebookMixin, CobaltMi
                                          on_download_ready=on_download_ready)
         clean_url = self.clean_url(url)
         platform = self.detect_platform(clean_url)
+        if platform == 'facebook':
+            from facebook_photo import photo_id, download_photo
+            if photo_id(clean_url):
+                return await download_photo(self, clean_url)
         if platform == 'youtube':
             duration = await asyncio.to_thread(youtube_duration, clean_url,
                                               getattr(self, 'youtube_cookies', None),
