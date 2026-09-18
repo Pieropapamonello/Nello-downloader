@@ -15,6 +15,7 @@ from cookie_health import (PLATFORMS, MAX_COOKIE_BYTES, read_content, inspect_co
 from media_worker import run_media_job
 from wa_media import prepare_video
 from subtitles import prepare_subtitles
+from speech_subtitles import prepare_spoken_subtitles
 VIDEO_EXTS = ('.mp4', '.mov', '.webm', '.mkv', '.avi', '.flv', '.ts')
 
 log = logging.getLogger(__name__)
@@ -157,6 +158,16 @@ def build_app(token=None, downloader_factory=None):
                             log.info('Optional subtitles skipped: %s', type(exc).__name__)
                     result['subtitles'] = 'unavailable' if not subtitle_path else 'pending'
                     paths = ([result['file_path']] if result.get('file_path') else result.get('files', []))
+                    if (not subtitle_path and result.get('type') == 'video' and body.get('kind') != 'audio'
+                            and len(paths) == 1 and Path(paths[0]).suffix.lower() in VIDEO_EXTS
+                            and downloader_factory is None):
+                        source = Path(paths[0]).resolve()
+                        if not source.is_relative_to(Path(directory.name).resolve()):
+                            raise ValueError('media outside job directory')
+                        try:
+                            subtitle_path = await asyncio.to_thread(prepare_spoken_subtitles, str(source), directory.name)
+                        except Exception as exc:
+                            log.info('Optional speech subtitles skipped: %s', type(exc).__name__)
                     descriptors = []
                     for path in paths:
                         path = str(Path(path).resolve())
@@ -194,6 +205,7 @@ def build_app(token=None, downloader_factory=None):
                     result.pop('file_path', None)
                     result.pop('files', None)
                     result['media'] = descriptors
+                    result['video_processing_version'] = 2
                     result['_delivery_prepared'] = target in ('whatsapp', 'discord')
                 job['result'] = result
                 if platform and cookie_version == inspect_content(read_content(platform), platform)['version']:

@@ -951,6 +951,9 @@ class SocialMediaDownloader(TikTokMixin, InstagramMixin, FacebookMixin, CobaltMi
             return await remote_download(url, target=getattr(self, 'delivery_platform', ''),
                                          max_bytes=getattr(self, 'delivery_max_bytes', 16 * 1024 * 1024),
                                          on_download_ready=on_download_ready)
+        from facebook_post import is_post_url, download_post
+        if is_post_url(url):
+            return await download_post(self, url)
         clean_url = self.clean_url(url)
         platform = self.detect_platform(clean_url)
         if platform == 'facebook':

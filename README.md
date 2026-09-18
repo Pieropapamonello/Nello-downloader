@@ -49,9 +49,31 @@ esaurita, un errore o tempi non allineabili lasciano il video originale.
 I sottotitoli vengono impressi con FFmpeg (H.264/AAC, un thread, massimo 640px).
 Ricerca/traduzione ha un budget separato di 60 secondi, conversione di 150 secondi;
 la pressione della memoria interrompe soltanto questa elaborazione opzionale.
-Non viene installato un modello di riconoscimento vocale su Render Free.
-I video senza tracce non vengono trascritti. L'esito e nei log e nel campo API
+Se mancano le tracce, i video singoli fino a **90 secondi** passano al riconoscimento
+locale `whisper.cpp` v1.7.6, modello multilingue tiny Q5_1 (circa 32 MB su disco).
+Prima riconosce la lingua su 12 secondi: prosegue solo se rileva inglese con
+confidenza almeno 0.85. Poi trascrive e traduce il testo, senza caricare audio
+su servizi esterni. La traduzione usa la stessa quota gratuita MyMemory.
+Nessuna API a pagamento, PyTorch, GPU o sessione permanente del modello.
+Il modello e il binario sono inclusi nell'immagine; checksum verificato in build.
+
+Il riconoscimento parte dopo la chiusura del processo downloader ed esegue un solo
+thread. Il supervisore interrompe l'intero gruppo di processi al limite memoria
+del container o dopo 240 secondi, conservando il video originale. Conversione
+e riconoscimento non si sovrappongono. Lingua incerta, assenza di parlato, durata
+eccessiva, quota o altri errori sono registrati solo nei log. La trascrizione
+automatica puo sbagliare nomi propri e parole, specialmente con musica/rumore.
+L'esito e nei log e nel campo API
 `subtitles`: `burned_it`, `unavailable`, `skipped_resource_or_encoding`.
+
+## Post Facebook condivisi
+
+I link `/share/`, `/posts/` e permalink vengono risolti al post originale.
+Il downloader accetta solo l'allegato collegato esplicitamente all'ID di quel
+post, ignorando video suggeriti, avatar e metadati generici `og:type`.
+Se non puo determinare l'allegato esatto o trova un album non supportato,
+si ferma senza inviare un contenuto diverso. Foto e descrizione provengono
+dal nodo del post identificato; i video vengono scaricati dal loro ID esatto.
 
 ## Verifica locale
 

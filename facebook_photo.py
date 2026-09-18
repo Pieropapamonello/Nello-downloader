@@ -59,7 +59,7 @@ def extract_photo(page, ident):
                 stack.extend(v for v in node.values() if isinstance(v, (list, dict)))
                 if str(node.get('id')) != ident:
                     continue
-                candidate = node.get('image') or {}
+                candidate = node.get('image') or node.get('photo_image') or {}
                 if isinstance(candidate, dict):
                     uri = candidate.get('uri', '')
                     host = (urlsplit(uri).hostname or '').lower()
@@ -78,19 +78,22 @@ def extract_photo(page, ident):
     return {'image': image, 'description': description, 'owner': owner} if image else None
 
 
-async def download_photo(dl, url):
-    ident = photo_id(url)
+async def download_photo(dl, url, *, seed_page=None, photo_ident=None, description=None):
+    ident = photo_ident or photo_id(url)
 
     def run():
         from curl_cffi import requests
         cookies = dl._load_netscape_cookies(getattr(dl, 'facebook_cookies', None))
         for jar in ([None, cookies] if cookies else [None]):
             try:
-                response = requests.get(url, impersonate='chrome99', cookies=jar,
-                                        proxies=getattr(dl, 'proxy_dict', None), timeout=20)
-                if response.status_code != 200 or len(response.content) > 8 * 1024 * 1024:
-                    continue
-                media = extract_photo(response.text, ident)
+                page = seed_page
+                if page is None:
+                    response = requests.get(url, impersonate='chrome99', cookies=jar,
+                                            proxies=getattr(dl, 'proxy_dict', None), timeout=20)
+                    if response.status_code != 200 or len(response.content) > 8 * 1024 * 1024:
+                        continue
+                    page = response.text
+                media = extract_photo(page, ident)
                 if not media:
                     continue
                 # Cookies are never forwarded to the CDN.
@@ -117,7 +120,7 @@ async def download_photo(dl, url):
                     if total < 100:
                         path.unlink(missing_ok=True)
                         continue
-                    return dl._pack_media_result([str(path)], media['description'], media['owner'], 'facebook', url)
+                    return dl._pack_media_result([str(path)], description or media['description'], media['owner'], 'facebook', url)
                 finally:
                     response.close()
             except Exception as exc:
