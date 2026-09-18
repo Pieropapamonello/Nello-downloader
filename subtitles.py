@@ -141,6 +141,9 @@ def translate_cues(cues, session):
     texts = list(dict.fromkeys(c[2] for c in cues))
     if sum(len(t) for t in texts) > MAX_TEXT:
         raise ValueError('free translation budget exceeded')
+    from local_translation import available, translate
+    if available():
+        return translate(cues)
     batches, batch = [], []
     for text in texts:
         if len(text.encode()) > 450:

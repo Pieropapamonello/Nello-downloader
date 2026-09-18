@@ -5,3 +5,5 @@ curl_cffi==0.13.0
 git+https://github.com/yt-dlp/yt-dlp.git@master
 bgutil-ytdlp-pot-provider
 yt-dlp-ejs
+ctranslate2==4.6.0
+sentencepiece==0.2.1

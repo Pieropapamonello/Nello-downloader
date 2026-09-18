@@ -24,9 +24,15 @@ RUN git clone --depth 1 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.
  && cd /opt/bgutil/server && npm install && npx tsc
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+RUN curl -fL --retry 3 https://argos-net.com/v1/translate-en_it-1_0.argosmodel -o /tmp/en_it.zip \
+ && echo 'dde2180001a47904ecbbd688a41e35db8a040e4fd5b52e4f29b4bb499516ab32  /tmp/en_it.zip' | sha256sum -c - \
+ && mkdir -p /opt/translation \
+ && unzip /tmp/en_it.zip 'en_it/model/*' 'en_it/sentencepiece.model' 'en_it/metadata.json' 'en_it/README.md' -d /opt/translation \
+ && rm /tmp/en_it.zip
 COPY --from=speech-build /opt/whisper /opt/whisper
 COPY *.py ./
 COPY start-downloader.sh ./
 ENV DENO_V8_FLAGS=--max-old-space-size=144,--max-semi-space-size=1,--jitless
+ENV OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
 EXPOSE 10000
 CMD ["bash", "start-downloader.sh"]

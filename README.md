@@ -58,7 +58,12 @@ Se mancano le tracce, i video singoli fino a **90 secondi** passano al riconosci
 locale `whisper.cpp` v1.7.6, modello multilingue tiny Q5_1 (circa 32 MB su disco).
 Prima riconosce la lingua su 12 secondi: prosegue solo se rileva inglese con
 confidenza almeno 0.85. Poi trascrive e traduce il testo, senza caricare audio
-su servizi esterni. La traduzione usa la stessa quota gratuita MyMemory.
+su servizi esterni. La traduzione viene eseguita sul server con il modello
+Argos English-Italian 1.0 e CTranslate2 int8, un thread e una frase per volta.
+Non dipende dalle quote dei servizi pubblici di traduzione. Il modello parte
+solo dopo la chiusura di Whisper, nel processo temporaneo sorvegliato; non
+rimane in memoria tra i download. Sono inclusi solo tokenizer e traduttore,
+senza Stanza o PyTorch. Anche questo archivio ha un checksum verificato.
 Nessuna API a pagamento, PyTorch, GPU o sessione permanente del modello.
 Il modello e il binario sono inclusi nell'immagine; checksum verificato in build.
 

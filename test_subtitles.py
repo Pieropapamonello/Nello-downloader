@@ -88,6 +88,16 @@ class CaptionTests(unittest.TestCase):
                          [(0, 1000, 'Ciao'), (1000, 2000, 'Mondo')])
         self.assertEqual(session.get.call_count, 2)
 
+    def test_local_translation_avoids_external_requests(self):
+        session = MagicMock()
+        cues = [(0, 1000, 'Hello')]
+        translated = [(0, 1000, 'Ciao')]
+        with patch('local_translation.available', return_value=True), \
+                patch('local_translation.translate', return_value=translated) as local:
+            self.assertEqual(translate_cues(cues, session), translated)
+        local.assert_called_once_with(cues)
+        session.get.assert_not_called()
+
     def test_italian_unknown_and_long_videos_not_processed(self):
         with tempfile.TemporaryDirectory() as directory, patch('requests.Session') as session:
             for lang, duration in (('it', 3), ('', 3), ('en', 181), ('en', 0)):

@@ -143,8 +143,9 @@ def prepare_spoken_subtitles(source, directory, timeout=240):
                 return None
             time.sleep(.1)
         report = json.loads(status.read_text(encoding='utf-8')) if status.exists() else {'reason': 'worker_failed'}
-        log.info('Speech subtitles: reason=%s seconds=%.1f peak_rss_mb=%s',
-                 report.get('reason'), time.monotonic() - started, report.get('peak_rss_mb'))
+        log.info('Speech subtitles: reason=%s seconds=%.1f peak_rss_mb=%s worker_peak_rss_mb=%s',
+                 report.get('reason'), time.monotonic() - started, report.get('peak_rss_mb'),
+                 report.get('worker_peak_rss_mb'))
         if proc.returncode == 0 and output.exists() and output.stat().st_size:
             return str(output)
         return None
@@ -169,5 +170,6 @@ if __name__ == '__main__':
     if os.name == 'posix':
         import resource
         report['peak_rss_mb'] = round(resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss / 1024, 1)
+        report['worker_peak_rss_mb'] = round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024, 1)
     (Path(sys.argv[2]).parent / 'speech_status.json').write_text(json.dumps(report), encoding='utf-8')
     raise SystemExit(0 if ok else 1)
