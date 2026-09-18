@@ -77,6 +77,17 @@ class CaptionTests(unittest.TestCase):
             self.assertIn('Ciao mondo!', path.read_text(encoding='utf-8'))
             session.return_value.__enter__.return_value.get.assert_not_called()
 
+    def test_free_provider_fallback_preserves_cues(self):
+        session = MagicMock()
+        failed = MagicMock()
+        failed.__enter__.return_value.raise_for_status.side_effect = RuntimeError('provider unavailable')
+        success = MagicMock()
+        success.__enter__.return_value.json.return_value = [[['Ciao\n', 'Hello'], ['Mondo', 'World']]]
+        session.get.side_effect = [failed, success]
+        self.assertEqual(translate_cues([(0, 1000, 'Hello'), (1000, 2000, 'World')], session),
+                         [(0, 1000, 'Ciao'), (1000, 2000, 'Mondo')])
+        self.assertEqual(session.get.call_count, 2)
+
     def test_italian_unknown_and_long_videos_not_processed(self):
         with tempfile.TemporaryDirectory() as directory, patch('requests.Session') as session:
             for lang, duration in (('it', 3), ('', 3), ('en', 181), ('en', 0)):

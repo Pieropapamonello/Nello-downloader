@@ -147,17 +147,37 @@ def translate_cues(cues, session):
     if batch:
         batches.append(batch)
     translated = {}
+    provider = 'mymemory'
     for batch in batches:
-        with session.get('https://api.mymemory.translated.net/get',
-                         params={'q': '\n'.join(batch), 'langpair': 'en|it'}, timeout=(5, 10)) as response:
-            response.raise_for_status()
-            data = response.json()
-        value = data.get('responseData', {}).get('translatedText')
-        if str(data.get('responseStatus')) != '200' or data.get('quotaFinished') or not value:
-            raise ValueError('free translation unavailable')
-        lines = html.unescape(value).strip().splitlines()
-        if len(lines) != len(batch) or not all(line.strip() for line in lines):
-            raise ValueError('translation changed cue alignment')
+        lines = None
+        for candidate in (('mymemory', 'google_public') if provider == 'mymemory' else ('google_public',)):
+            try:
+                if candidate == 'mymemory':
+                    with session.get('https://api.mymemory.translated.net/get',
+                                     params={'q': '\n'.join(batch), 'langpair': 'en|it'}, timeout=(5, 10)) as response:
+                        response.raise_for_status()
+                        data = response.json()
+                    value = data.get('responseData', {}).get('translatedText')
+                    if str(data.get('responseStatus')) != '200' or data.get('quotaFinished') or not value:
+                        raise ValueError('free translation quota/unavailable')
+                else:
+                    # Same public endpoint used by googletrans, not a billable Cloud API.
+                    with session.get('https://translate.googleapis.com/translate_a/single',
+                                     params={'client': 'gtx', 'sl': 'en', 'tl': 'it', 'dt': 't',
+                                             'q': '\n'.join(batch)}, timeout=(5, 10)) as response:
+                        response.raise_for_status()
+                        data = response.json()
+                    value = ''.join(part[0] for part in data[0] if part and isinstance(part[0], str))
+                result = html.unescape(value).strip().splitlines()
+                if len(result) != len(batch) or not all(line.strip() for line in result):
+                    raise ValueError('translation changed cue alignment')
+                lines, provider = result, candidate
+                break
+            except Exception as exc:
+                log.info('Free translation provider unavailable: provider=%s type=%s status=%s',
+                         candidate, type(exc).__name__, getattr(getattr(exc, 'response', None), 'status_code', None))
+        if lines is None:
+            raise ValueError('free translation unavailable or invalid cue alignment')
         translated.update(zip(batch, lines))
     return [(start, end, translated[text]) for start, end, text in cues]
 
