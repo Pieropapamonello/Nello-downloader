@@ -8,7 +8,7 @@ import subprocess
 import sys
 import time
 
-from subtitles import translate_cues, srt_time
+from subtitles import translate_cues, srt_time, TranslationUnavailable
 from youtube_job import memory_pressure, stop_job
 
 log = logging.getLogger(__name__)
@@ -160,6 +160,8 @@ if __name__ == '__main__':
         build_from_audio(sys.argv[1], sys.argv[2])
         reason, ok = 'translated_english_audio', True
     except SkipSpeech as exc:
+        reason = str(exc)
+    except TranslationUnavailable as exc:
         reason = str(exc)
     except Exception as exc:
         reason = type(exc).__name__

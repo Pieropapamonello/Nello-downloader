@@ -17,6 +17,11 @@ MAX_BYTES = 512 * 1024
 MAX_TEXT = 4000
 
 
+class TranslationUnavailable(ValueError):
+    """Bounded provider diagnostics, without source text or URLs."""
+    pass
+
+
 def language(code):
     base = str(code or '').lower().replace('_', '-').split('-')[0]
     return {'eng': 'en', 'ita': 'it'}.get(base, base)
@@ -150,6 +155,7 @@ def translate_cues(cues, session):
     provider = 'mymemory'
     for batch in batches:
         lines = None
+        failures = []
         for candidate in (('mymemory', 'google_public') if provider == 'mymemory' else ('google_public',)):
             try:
                 if candidate == 'mymemory':
@@ -168,16 +174,27 @@ def translate_cues(cues, session):
                         response.raise_for_status()
                         data = response.json()
                     value = ''.join(part[0] for part in data[0] if part and isinstance(part[0], str))
-                result = html.unescape(value).strip().splitlines()
+                result = [line.strip() for line in html.unescape(value).splitlines() if line.strip()]
+                if candidate == 'google_public' and len(result) != len(batch) and len(batch) > 1:
+                    # Some responses merge paragraph boundaries; translate each cue separately.
+                    result = []
+                    for cue in batch:
+                        with session.get('https://translate.googleapis.com/translate_a/single',
+                                         params={'client': 'gtx', 'sl': 'en', 'tl': 'it', 'dt': 't', 'q': cue},
+                                         timeout=(5, 10)) as response:
+                            response.raise_for_status()
+                            data = response.json()
+                        result.append(''.join(part[0] for part in data[0] if part and isinstance(part[0], str)).strip())
                 if len(result) != len(batch) or not all(line.strip() for line in result):
                     raise ValueError('translation changed cue alignment')
                 lines, provider = result, candidate
                 break
             except Exception as exc:
+                failures.append(f'{candidate}:{type(exc).__name__}:{getattr(getattr(exc, "response", None), "status_code", "none")}')
                 log.info('Free translation provider unavailable: provider=%s type=%s status=%s',
                          candidate, type(exc).__name__, getattr(getattr(exc, 'response', None), 'status_code', None))
         if lines is None:
-            raise ValueError('free translation unavailable or invalid cue alignment')
+            raise TranslationUnavailable(';'.join(failures))
         translated.update(zip(batch, lines))
     return [(start, end, translated[text]) for start, end, text in cues]
 
