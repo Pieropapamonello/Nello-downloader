@@ -64,7 +64,7 @@ def readable_cues(cues):
     import textwrap
     result = []
     for start, end, text in cues:
-        pieces = textwrap.wrap(text, width=76, break_long_words=False, break_on_hyphens=False)
+        pieces = textwrap.wrap(text, width=52, break_long_words=False, break_on_hyphens=False)
         total = sum(len(p) for p in pieces)
         offset = start
         consumed = 0
