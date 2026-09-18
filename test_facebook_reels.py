@@ -4,6 +4,11 @@ from social_downloader import SocialMediaDownloader
 from smd_facebook import FacebookMixin, is_facebook_video_url, facebook_video_id
 
 class FacebookReelTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        mock = patch('facebook_video.download_video', AsyncMock(return_value=None))
+        mock.start()
+        self.addCleanup(mock.stop)
+
     def test_facebook_uses_browser_transport_without_forcing_cookies(self):
         dl = SocialMediaDownloader.__new__(SocialMediaDownloader)
         dl.base_opts = {}

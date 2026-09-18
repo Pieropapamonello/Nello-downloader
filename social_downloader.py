@@ -1116,6 +1116,10 @@ class SocialMediaDownloader(TikTokMixin, InstagramMixin, FacebookMixin, CobaltMi
             return {'success': False, 'error': 'YouTube non ha completato il download. Riprova tra poco.'}
 
         if platform == 'facebook' and is_facebook_video_url(clean_url):
+            from facebook_video import download_video as exact_reel
+            result = await exact_reel(self, clean_url)
+            if result:
+                return result
             logger.warning('Facebook reel unavailable after extraction; no photo fallback: %s', clean_url)
             return {'success': False, 'error': 'Facebook reel video could not be downloaded'}
 

@@ -10,6 +10,15 @@ def page(data):
 
 
 class PhotoTests(unittest.IsolatedAsyncioTestCase):
+    def test_reel_parser_rejects_related_videos_and_prefers_sd(self):
+        from facebook_video import extract_video
+        source = page([{'id': '999', 'browser_native_sd_url': 'https://x.fbcdn.net/wrong.mp4'},
+                       {'id': '123', 'videoDeliveryLegacyFields': {
+                           'browser_native_sd_url': 'https://x.fbcdn.net/correct.mp4',
+                           'browser_native_hd_url': 'https://x.fbcdn.net/large.mp4'}}])
+        self.assertEqual(extract_video(source, '123')['url'], 'https://x.fbcdn.net/correct.mp4')
+        self.assertIsNone(extract_video(source, '456'))
+
     def test_exact_id_and_description_across_fragments(self):
         data = [{'id': '111', 'image': {'uri': 'https://x.fbcdn.net/avatar.jpg', 'width': 2000, 'height': 2000}},
                 {'id': '123', 'image': {'uri': 'https://x.fbcdn.net/photo.jpg', 'width': 1080, 'height': 1350}},
