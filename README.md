@@ -39,17 +39,15 @@ non e verificabile, il video resta invariato. Su TikTok viene conservata la ling
 delle tracce ASR, distinguendole da quelle MT tradotte.
 
 La traccia italiana del social ha priorita. Altrimenti le battute inglesi
-vengono tradotte tramite l'endpoint gratuito Get di MyMemory (nessuna
-chiave, abbonamento o API a pagamento). Il servizio dichiara 5000 caratteri al
-giorno per uso anonimo: <https://mymemory.translated.net/doc/usagelimits.php>.
-La richiesta invia solo il testo dei sottotitoli, mai cookie o audio.
-Se MyMemory non risponde o esaurisce la quota, viene provato l'endpoint pubblico
-di Google Translate usato da googletrans, senza chiavi o fatturazione Cloud.
-E un endpoint non ufficiale, quindi puo essere limitato o cambiare: se anche
-questo fallisce, resta il video originale. Non si riprova il fornitore che ha
-rifiutato la richiesta per ogni battuta successiva.
-Per ciascun video sono ammessi fino a 4000 caratteri e 300 battute; una quota
-esaurita, un errore o tempi non allineabili lasciano il video originale.
+vengono tradotte localmente con il modello incluso nell'immagine Docker,
+senza richieste esterne, chiavi o abbonamenti. Per ciascun video sono ammessi
+fino a 4000 caratteri e 300 battute; errori o limiti di risorse lasciano
+il video originale.
+
+Solo nelle installazioni senza modello locale viene usato MyMemory gratuito,
+con riserva sul servizio pubblico Google Translate usato da googletrans.
+Questi servizi ricevono solo testo, mai audio o cookie, e possono rifiutare
+richieste per limiti di quota; il servizio Render distribuito non ne dipende.
 
 I sottotitoli vengono impressi con FFmpeg (H.264/AAC, un thread, massimo 640px).
 Ricerca/traduzione ha un budget separato di 60 secondi, conversione di 150 secondi;
