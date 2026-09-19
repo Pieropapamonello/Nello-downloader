@@ -63,14 +63,15 @@ def caption_y(source, duration, width, height):
     started = time.monotonic()
     try:
         for fraction in (.15, .45, .75):
-            if time.monotonic() - started > 18:
+            if time.monotonic() - started > 30:
                 break
             subprocess.run(['ffmpeg', '-nostdin', '-v', 'error', '-y', '-threads', '1',
+                            '-filter_threads', '1',
                             '-ss', str(duration * fraction), '-i', str(source), '-frames:v', '1',
-                            '-vf', 'scale=360:-2', str(image)], check=True,
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
+                            '-vf', 'scale=360:-2', '-threads', '1', str(image)], check=True,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
             result = subprocess.run(['tesseract', str(image), 'stdout', '-l', 'eng', '--psm', '11', 'tsv'],
-                                    capture_output=True, text=True, timeout=5, check=True)
+                                    capture_output=True, text=True, timeout=10, check=True)
             positions.append(text_band(result.stdout, round(360 * height / width)))
         # Require agreement between samples rather than following arbitrary page text.
         for sample in positions:
@@ -81,8 +82,8 @@ def caption_y(source, duration, width, height):
                     anchor = max(.12, statistics.median(nearby) - .012)
                     log.info('Dynamic captions positioned above detected text: y=%.3f', anchor)
                     return anchor
-    except (subprocess.SubprocessError, OSError):
-        log.info('Caption position detection unavailable; using compact default position')
+    except (subprocess.SubprocessError, OSError) as exc:
+        log.info('Caption position detection unavailable (%s); using compact default position', type(exc).__name__)
     finally:
         image.unlink(missing_ok=True)
     return .64
