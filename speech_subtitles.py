@@ -182,6 +182,7 @@ def prepare_spoken_subtitles(source, directory, timeout=240):
         log.info('Speech subtitles: reason=%s seconds=%.1f peak_rss_mb=%s worker_peak_rss_mb=%s',
                  report.get('reason'), time.monotonic() - started, report.get('peak_rss_mb'),
                  report.get('worker_peak_rss_mb'))
+        log.info('Burned caption detection: %s', report.get('ocr', {}))
         if proc.returncode == 0 and output.exists() and output.stat().st_size:
             return str(output)
         return None
@@ -202,7 +203,7 @@ if __name__ == '__main__':
         reason = str(exc)
     except Exception as exc:
         reason = type(exc).__name__
-    report = {'reason': reason}
+    report = {'reason': reason, 'ocr': getattr(sys.modules.get('burned_captions'), 'diagnostics', {})}
     if os.name == 'posix':
         import resource
         report['peak_rss_mb'] = round(resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss / 1024, 1)

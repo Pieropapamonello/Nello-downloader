@@ -6,6 +6,7 @@ Static signs, logos, and uncertain detections never authorize a black mask.
 import csv
 import io
 import logging
+import os
 from pathlib import Path
 import re
 import shutil
@@ -14,35 +15,37 @@ import time
 
 log = logging.getLogger(__name__)
 ROW = 96
+diagnostics = {}
 
 
 def words(text):
     return re.findall(r"[a-z]+(?:'[a-z]+)?", text.lower())
 
 
-def recognized_rows(tsv, count):
+def recognized_rows(tsv, count, confidence=35):
     result = [[] for _ in range(count)]
     for row in csv.DictReader(io.StringIO(tsv), delimiter='\t'):
         try:
             index = int(row['top']) // ROW
             text = row['text'].strip()
-            if 0 <= index < count and float(row['conf']) >= 35 and words(text):
+            if 0 <= index < count and float(row['conf']) >= confidence and words(text):
                 result[index].append(text)
         except (KeyError, ValueError):
             continue
     return [' '.join(r).strip() for r in result]
 
 
-def ocr(strips, path, timeout):
+def ocr(strips, path, timeout, confidence=35):
     from PIL import Image
     sheet = Image.new('L', (400, ROW * len(strips)), 255)
     for i, strip in enumerate(strips):
         strip.thumbnail((360, 64))
         sheet.paste(strip, (20 + (360 - strip.width) // 2, i * ROW + 16))
     sheet.save(path)
+    env = dict(os.environ, OMP_THREAD_LIMIT='1', OMP_NUM_THREADS='1')
     result = subprocess.run(['tesseract', str(path), 'stdout', '-l', 'eng', '--psm', '6', 'tsv'],
-                            capture_output=True, text=True, check=True, timeout=timeout)
-    return recognized_rows(result.stdout, len(strips))
+                            capture_output=True, text=True, check=True, timeout=timeout, env=env)
+    return recognized_rows(result.stdout, len(strips), confidence)
 
 
 def binary(image):
@@ -84,6 +87,8 @@ def changing_band(samples):
 
 
 def source_captions(source, cues, duration, metadata):
+    diagnostics.clear()
+    diagnostics.update(phase='start', outcome='unavailable')
     if not shutil.which('tesseract'):
         return None
     from PIL import Image
@@ -97,6 +102,7 @@ def source_captions(source, cues, duration, metadata):
     command = ['ffmpeg', '-nostdin', '-v', 'error', '-threads', '1', '-filter_threads', '1']
     try:
         strips, descriptors = [], []
+        diagnostics['phase'] = 'sample_frames'
         for i, fraction in enumerate((.15, .45, .75)):
             raw = subprocess.check_output(command + ['-ss', str(duration * fraction), '-i', str(source),
                             '-vf', f'scale=360:{height}', '-frames:v', '1', '-threads', '1',
@@ -107,15 +113,19 @@ def source_captions(source, cues, duration, metadata):
                 descriptors.append((i, a, b))
         if not strips:
             return None
+        diagnostics['phase'] = 'sample_ocr'
         text = ocr(strips, sheet, timeout=12)
         samples = [(*d, t) for d, t in zip(descriptors, text) if matches_speech(t, vocabulary)]
         band = changing_band(samples)
         if not band:
+            diagnostics['outcome'] = 'no_verified_band'
             log.info('No changing burned captions matching speech; use bottom captions')
             return None
         a, b = band
+        a, b = (a // 2) * 2, min(height, ((b + 1) // 2) * 2)
         # Decode only the detected strip, at 4 samples/second, in one process.
         fps = 4
+        diagnostics['phase'] = 'strip_decode'
         raw = subprocess.check_output(command + ['-i', str(source), '-vf',
                     f'fps={fps},scale=360:{height},crop=360:{b-a}:0:{a}', '-threads', '1',
                     '-pix_fmt', 'rgb24', '-f', 'rawvideo', '-'], stderr=subprocess.DEVNULL, timeout=30)
@@ -124,11 +134,14 @@ def source_captions(source, cues, duration, metadata):
         if not 0 < count <= 360:
             return None
         strips = [binary(Image.frombytes('RGB', (360, b-a), raw[i*size:(i+1)*size])) for i in range(count)]
-        texts = ocr(strips, sheet, timeout=max(5, 80 - (time.monotonic() - started)))
+        diagnostics['phase'] = 'track_ocr'
+        texts = ocr(strips, sheet, timeout=max(5, 80 - (time.monotonic() - started)), confidence=55)
         result = []
         for i, text in enumerate(texts):
-            text = ' '.join(text.upper().split())
-            if not matches_speech(text, vocabulary):
+            text = re.sub(r"[^A-Z0-9'’ -]", '', text.upper()).strip(" '’")
+            # The moving band is already verified. Do not discard proper names
+            # just because the speech recognizer misspelled them.
+            if not words(text) or len(text) > 60:
                 continue
             start, end = round(i * 1000 / fps), min(round((i+1) * 1000 / fps), round(duration * 1000))
             if result and result[-1][2] == text and result[-1][1] == start:
@@ -136,14 +149,19 @@ def source_captions(source, cues, duration, metadata):
             elif start < end:
                 result.append((start, end, text))
         coverage = sum(e-s for s,e,_ in result) / (duration * 1000)
+        diagnostics.update(cues=len(result), coverage=round(coverage, 2))
         if len(result) < 4 or coverage < .65:
+            diagnostics['outcome'] = 'verified_mask_only'
             log.info('Burned captions incomplete: coverage=%.2f; preserve spoken captions', coverage)
             # The band is verified even when some words cannot be read.
             return cues, [0, a / height, 1, b / height], False
         log.info('Burned captions read: cues=%d coverage=%.2f seconds=%.1f', len(result), coverage, time.monotonic()-started)
+        diagnostics['outcome'] = 'translated_visible_text'
         return result, [0, a / height, 1, b / height], True
     except (subprocess.SubprocessError, OSError, ValueError) as exc:
+        diagnostics['outcome'] = type(exc).__name__
         log.info('Burned captions unavailable: %s; use bottom captions', type(exc).__name__)
         return None
     finally:
+        diagnostics['seconds'] = round(time.monotonic() - started, 1)
         sheet.unlink(missing_ok=True)

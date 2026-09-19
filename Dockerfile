@@ -37,6 +37,6 @@ COPY *.py ./
 COPY fonts/ ./fonts/
 COPY start-downloader.sh ./
 ENV DENO_V8_FLAGS=--max-old-space-size=144,--max-semi-space-size=1,--jitless
-ENV OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
+ENV OMP_NUM_THREADS=1 OMP_THREAD_LIMIT=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
 EXPOSE 10000
 CMD ["bash", "start-downloader.sh"]
