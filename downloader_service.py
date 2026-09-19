@@ -16,6 +16,7 @@ from media_worker import run_media_job
 from wa_media import prepare_video
 from subtitles import prepare_subtitles
 from speech_subtitles import prepare_spoken_subtitles
+from voice_transcription import run_voice_job, MAX_BYTES as MAX_VOICE_BYTES
 VIDEO_EXTS = ('.mp4', '.mov', '.webm', '.mkv', '.avi', '.flv', '.ts')
 
 log = logging.getLogger(__name__)
@@ -107,6 +108,40 @@ def build_app(token=None, downloader_factory=None):
             raise web.HTTPNotFound()
         return web.json_response({k: job[k] for k in ('state', 'result') if k in job})
 
+    async def submit_voice(request):
+        try:
+            ident = str(uuid.UUID(request.match_info['ident']))
+        except ValueError:
+            raise web.HTTPBadRequest()
+        if ident in jobs:
+            return web.json_response({'id': ident}, status=202)
+        if queue.full() or len(jobs) >= 32:
+            raise web.HTTPServiceUnavailable()
+        directory = tempfile.TemporaryDirectory(prefix='voice_job_')
+        job = {'state': 'uploading', 'body': {'kind': 'voice', 'url': ''},
+               'created': time.monotonic(), 'directory': directory, 'paths': []}
+        jobs[ident] = job
+        try:
+            size = 0
+            with open(os.path.join(directory.name, 'input.audio'), 'wb') as output:
+                async with asyncio.timeout(60):
+                    async for chunk in request.content.iter_chunked(65536):
+                        size += len(chunk)
+                        if size > MAX_VOICE_BYTES:
+                            raise web.HTTPRequestEntityTooLarge(max_size=MAX_VOICE_BYTES, actual_size=size)
+                        output.write(chunk)
+            if not size:
+                raise web.HTTPBadRequest()
+            if queue.full():
+                raise web.HTTPServiceUnavailable()
+            job['state'] = 'queued'
+            queue.put_nowait(ident)
+        except BaseException:
+            jobs.pop(ident, None)
+            directory.cleanup()
+            raise
+        return web.json_response({'id': ident}, status=202)
+
     async def media(request):
         job = jobs.get(request.match_info['ident'])
         try:
@@ -132,12 +167,18 @@ def build_app(token=None, downloader_factory=None):
             job = jobs[ident]
             body = job['body']
             job['state'] = 'running'
-            directory = tempfile.TemporaryDirectory(prefix='media_job_')
+            directory = job.get('directory') or tempfile.TemporaryDirectory(prefix='media_job_')
             job['directory'] = directory
             job['paths'] = []
             platform = platform_for_url(body['url'])
             cookie_version = inspect_content(read_content(platform), platform)['version'] if platform else None
             try:
+                if body.get('kind') == 'voice':
+                    try:
+                        job['result'] = await asyncio.to_thread(run_voice_job, os.path.join(directory.name, 'input.audio'))
+                    finally:
+                        directory.cleanup()
+                    continue
                 target = body.get('target', '')
                 if downloader_factory is None:
                     result = await asyncio.to_thread(run_media_job, body, directory.name)
@@ -244,6 +285,7 @@ def build_app(token=None, downloader_factory=None):
     async def health(request):
         return web.json_response({'status': 'ok', 'queued': queue.qsize()})
     app.add_routes([web.get('/healthz', health), web.post('/jobs', submit),
+                    web.post('/voice-jobs/{ident}', submit_voice),
                     web.get('/admin/cookies', cookie_status),
                     web.put('/admin/cookies/{platform}', update_cookie),
                     web.get('/jobs/{ident}', status), web.delete('/jobs/{ident}', remove),
