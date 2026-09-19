@@ -214,6 +214,27 @@ def build_subtitles(meta, output):
         return False
     import requests
     with requests.Session() as session:
+        source = meta.get('_source_path')
+        if source and Path(source).is_file():
+            # Same verified-mask pipeline for videos with native caption tracks.
+            for track in meta.get('tracks', {}).get('en', [])[:1]:
+                try:
+                    english = fetch_track(track, session)
+                    from burned_captions import source_captions
+                    probe = subprocess.check_output(['ffprobe', '-v', 'error', '-show_streams', '-of', 'json', source], timeout=10)
+                    visual = source_captions(source, english, float(meta['duration']), json.loads(probe))
+                    if visual:
+                        cues, box, exact = visual
+                        Path(output).with_name('caption_layout.json').write_text(json.dumps({'box': box, 'source': 'burned' if exact else 'speech'}))
+                        if exact:
+                            translated = translate_cues(cues, session)
+                            Path(output).write_text('\n\n'.join(f'{i}\n{srt_time(a)} --> {srt_time(b)}\n{html.escape(t, quote=False)}'
+                                                    for i, (a, b, t) in enumerate(translated, 1)) + '\n', encoding='utf-8')
+                            return True
+                    break
+                except Exception as exc:
+                    Path(output).with_name('caption_layout.json').unlink(missing_ok=True)
+                    log.info('Native burned caption detection skipped: %s', type(exc).__name__)
         for lang in ('it', 'en'):
             for track in meta.get('tracks', {}).get(lang, [])[:2]:
                 try:
@@ -231,12 +252,15 @@ def build_subtitles(meta, output):
     return False
 
 
-def prepare_subtitles(meta, directory, timeout=60):
+def prepare_subtitles(meta, directory, timeout=100, source=None):
     """Separate resource budget: failure cannot discard an already downloaded video."""
     if not meta or memory_pressure():
         return None
     request = Path(directory) / 'subtitle_request.json'
     output = Path(directory) / 'italian.srt'
+    meta = dict(meta)
+    if source and Path(source).resolve().is_relative_to(Path(directory).resolve()):
+        meta['_source_path'] = str(Path(source).resolve())
     request.write_text(json.dumps(meta), encoding='utf-8')
     proc = None
     try:

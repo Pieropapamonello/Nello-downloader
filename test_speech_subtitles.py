@@ -3,10 +3,21 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-from speech_subtitles import english_detection, transcript_cues, readable_cues, SkipSpeech, prepare_spoken_subtitles
+from speech_subtitles import (english_detection, transcript_cues, readable_cues, SkipSpeech,
+                              prepare_spoken_subtitles, speech_windows, respect_pauses)
 
 
 class SpeechTests(unittest.TestCase):
+    def test_long_pause_is_not_filled_or_merged(self):
+        windows = speech_windows('VAD segment 0: start = 0.10, end = 6.39\nVAD segment 1: start = 14.41, end = 18.00')
+        data = {'result': {'language': 'en'}, 'transcription': [
+            {'offsets': {'from': 5780, 'to': 14450}, 'text': 'country.'},
+            {'offsets': {'from': 14450, 'to': 15420}, 'text': 'Think of it.'}]}
+        cues = transcript_cues(respect_pauses(data, windows), 42)
+        self.assertEqual(cues[0], (5780, 6390, 'country.'))
+        self.assertFalse(any(s <= 7000 < e for s, e, _ in cues))
+        self.assertEqual(cues[1][0], 14450)
+
     def test_only_confident_english_is_processed(self):
         self.assertTrue(english_detection('auto-detected language: en (p = 0.999528)'))
         for output in ('auto-detected language: it (p = 0.998)',

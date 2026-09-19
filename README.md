@@ -50,13 +50,18 @@ Questi servizi ricevono solo testo, mai audio o cookie, e possono rifiutare
 richieste per limiti di quota; il servizio Render distribuito non ne dipende.
 
 I sottotitoli vengono impressi con FFmpeg (H.264/AAC, un thread, massimo 640px).
-Sono gialli, maiuscoli e in gruppi di massimo tre parole, con una breve
-animazione. I gruppi italiani sono distribuiti nei tempi delle frasi tradotte:
-non e un allineamento fonetico parola per parola. Un controllo OCR limitato
-a tre fotogrammi cerca una fascia stabile di grandi scritte maiuscole e
-posiziona l'italiano subito sopra; se non la identifica usa una posizione
-compatta al 64% dell'altezza. Le scritte originali restano nel video.
-Ricerca/traduzione ha un budget separato di 60 secondi, conversione di 150 secondi;
+Sono gialli, maiuscoli, con il carattere Luckiest Guy incluso con licenza Apache,
+piu grandi anche nei video orizzontali e in basso per impostazione predefinita.
+Silero VAD identifica le pause: i sottotitoli vocali non attraversano gli
+intervalli senza parlato. La divisione interna delle frasi resta stimata.
+L'OCR lavora su piccole fasce bianche, non sull'intero sfondo. Solo scritte
+che cambiano fra fotogrammi e corrispondono al parlato inglese autorizzano
+una maschera nera. Se la lettura e sufficientemente completa, i frammenti
+originali vengono tradotti separatamente, con tempi campionati ogni 250 ms.
+In quel caso l'italiano sostituisce l'inglese nella stessa fascia coperta.
+Scritte statiche e loghi non autorizzano spostamenti o maschere. Incertezza o
+limiti di tempo mantengono i sottotitoli vocali in basso.
+Ricerca/traduzione ha un budget separato di 100 secondi, conversione di 150 secondi;
 la pressione della memoria interrompe soltanto questa elaborazione opzionale.
 Se mancano le tracce, i video singoli fino a **90 secondi** passano al riconoscimento
 locale `whisper.cpp` v1.7.6, modello multilingue tiny Q5_1 (circa 32 MB su disco).

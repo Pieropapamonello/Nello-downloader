@@ -1,8 +1,10 @@
 import tempfile
+import json
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from dynamic_captions import chunks, text_band, make_ass
+from dynamic_captions import chunks, make_ass
+from burned_captions import changing_band, matches_speech
 
 
 class DynamicTests(unittest.TestCase):
@@ -14,20 +16,29 @@ class DynamicTests(unittest.TestCase):
         self.assertTrue(all(len(r[2].split()) <= 3 for r in result))
         self.assertTrue(all(a[1] == b[0] for a, b in zip(result, result[1:])))
 
-    def test_large_uppercase_band_only(self):
-        tsv = 'block_num\tpar_num\tline_num\tleft\ttop\twidth\theight\tconf\ttext\n'
-        tsv += '1\t1\t1\t100\t430\t160\t25\t90\tACTORS\n'
-        tsv += '2\t1\t1\t5\t5\t60\t10\t95\tLOGO\n'
-        tsv += '3\t1\t1\t100\t350\t60\t8\t95\tSMALL\n'
-        self.assertEqual(text_band(tsv, 640), [430 / 640])
+    def test_static_signs_never_authorize_a_mask(self):
+        self.assertIsNone(changing_band([(0, 50, 70, 'NEVADA'), (1, 50, 70, 'NEVADA')]))
+        self.assertFalse(matches_speech('NO TAX ON TIPS', {'millions', 'country', 'people'}))
+        self.assertEqual(changing_band([(0, 430, 460, 'WE PLAYED'), (1, 432, 461, 'PROLOGUE')]), (430, 461))
 
     def test_ass_is_yellow_bold_uppercase_and_escapes_commands(self):
         with tempfile.TemporaryDirectory() as directory:
             srt = Path(directory) / 'italian.srt'
             srt.write_text('1\n00:00:01,000 --> 00:00:03,000\nCiao mondo!\n', encoding='utf-8')
-            with patch('dynamic_captions.caption_y', return_value=.65):
-                ass = make_ass(srt, 'video.mp4', 3, 360, 640).read_text(encoding='utf-8')
+            ass = make_ass(srt, 'video.mp4', 3, 640, 360).read_text(encoding='utf-8')
             self.assertIn('&H0000FFFF', ass)
             self.assertIn('CIAO MONDO!', ass)
-            self.assertIn('\\pos(180,416)', ass)
-            self.assertIn('\\t(0,90,', ass)
+            self.assertIn('\\pos(360,360)', ass)
+            self.assertIn('Luckiest Guy,42', ass)
+            self.assertNotIn('Dialogue: 0', ass)
+
+    def test_screen_phrase_not_split_or_borrowed_and_english_is_covered(self):
+        with tempfile.TemporaryDirectory() as directory:
+            srt = Path(directory) / 'italian.srt'
+            srt.write_text('1\n00:00:08,000 --> 00:00:08,750\nAbbiamo giocato\n\n2\n00:00:08,750 --> 00:00:09,500\nIl prologo\n', encoding='utf-8')
+            srt.with_name('caption_layout.json').write_text(json.dumps({'source': 'burned', 'box': [0, .67, 1, .72]}))
+            ass = make_ass(srt, 'video.mp4', 10, 360, 640).read_text(encoding='utf-8')
+            self.assertIn('ABBIAMO GIOCATO\n', ass)
+            self.assertNotIn('ABBIAMO GIOCATO IL', ass)
+            self.assertIn('Dialogue: 0,0:00:00.00,0:00:10.00,Mask', ass)
+            self.assertIn('\\alpha&H00&', ass)

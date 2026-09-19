@@ -30,7 +30,11 @@ RUN curl -fL --retry 3 https://argos-net.com/v1/translate-en_it-1_0.argosmodel -
  && unzip /tmp/en_it.zip 'en_it/model/*' 'en_it/sentencepiece.model' 'en_it/metadata.json' 'en_it/README.md' -d /opt/translation \
  && rm /tmp/en_it.zip
 COPY --from=speech-build /opt/whisper /opt/whisper
+RUN curl -fL --retry 3 https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin -o /opt/whisper/ggml-silero-v5.1.2.bin \
+ && echo '29940d98d42b91fbd05ce489f3ecf7c72f0a42f027e4875919a28fb4c04ea2cf  /opt/whisper/ggml-silero-v5.1.2.bin' | sha256sum -c -
+COPY fonts/ /usr/local/share/fonts/nello/
 COPY *.py ./
+COPY fonts/ ./fonts/
 COPY start-downloader.sh ./
 ENV DENO_V8_FLAGS=--max-old-space-size=144,--max-semi-space-size=1,--jitless
 ENV OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1

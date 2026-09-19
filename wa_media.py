@@ -66,7 +66,7 @@ def prepare_video(path, timeout=180, max_bytes=16 * 1024 * 1024, subtitle_path=N
                     raise ValueError('subtitle file outside media directory')
                 from dynamic_captions import make_ass
                 make_ass(subtitle_path, path, duration, video['width'], video['height'])
-                filters += ',ass=italian.ass'
+                filters += ',ass=italian.ass:fontsdir=caption_fonts'
             cmd += [
                 '-vf', filters,
                 '-r', fps, '-c:v', 'libx264', '-threads', '1',

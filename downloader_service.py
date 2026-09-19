@@ -149,11 +149,13 @@ def build_app(token=None, downloader_factory=None):
                     result = await (dl.download_audio(body['url']) if body.get('kind') == 'audio'
                                     else dl.download_video(body['url']))
                 if result.get('success'):
+                    paths = ([result['file_path']] if result.get('file_path') else result.get('files', []))
                     subtitle_meta = result.pop('_subtitle_meta', None)
                     subtitle_path = None
                     if subtitle_meta and body.get('subtitles', True):
                         try:
-                            subtitle_path = await asyncio.to_thread(prepare_subtitles, subtitle_meta, directory.name)
+                            source = paths[0] if len(paths) == 1 else None
+                            subtitle_path = await asyncio.to_thread(prepare_subtitles, subtitle_meta, directory.name, source=source)
                         except Exception as exc:
                             log.info('Optional subtitles skipped: %s', type(exc).__name__)
                     result['subtitles'] = 'unavailable' if not subtitle_path else 'pending'
@@ -207,7 +209,7 @@ def build_app(token=None, downloader_factory=None):
                     result.pop('file_path', None)
                     result.pop('files', None)
                     result['media'] = descriptors
-                    result['video_processing_version'] = 3
+                    result['video_processing_version'] = 4
                     result['_delivery_prepared'] = target in ('whatsapp', 'discord')
                 job['result'] = result
                 if platform and cookie_version == inspect_content(read_content(platform), platform)['version']:

@@ -16,6 +16,7 @@ MAX_SECONDS = 90
 MIN_ENGLISH_PROBABILITY = 0.85
 MODEL = os.getenv('WHISPER_MODEL', '/opt/whisper/ggml-tiny-q5_1.bin')
 CLI = os.getenv('WHISPER_CLI', '/opt/whisper/whisper-cli')
+VAD_MODEL = os.getenv('WHISPER_VAD_MODEL', '/opt/whisper/ggml-silero-v5.1.2.bin')
 
 
 class SkipSpeech(Exception):
@@ -51,12 +52,39 @@ def transcript_cues(data, duration):
     merged = []
     for start, end, text in cues:
         if (merged and not re.search(r'[.!?]["\']?$', merged[-1][2])
+                and start - merged[-1][1] <= 250
                 and end - merged[-1][0] <= 8500
                 and len((merged[-1][2] + ' ' + text).encode('utf-8')) <= 400):
             merged[-1] = (merged[-1][0], end, merged[-1][2] + ' ' + text)
         else:
             merged.append((start, end, text))
     return merged
+
+
+def speech_windows(log_text):
+    windows = []
+    for start, end in re.findall(r'VAD segment \d+: start = ([\d.]+), end = ([\d.]+)', log_text):
+        start, end = round(float(start) * 1000), round(float(end) * 1000)
+        if windows and start - windows[-1][1] < 600:
+            windows[-1] = (windows[-1][0], end)
+        elif start < end:
+            windows.append((start, end))
+    return windows
+
+
+def respect_pauses(data, windows):
+    """Trim ASR segments to actual speech; never stretch a word over applause."""
+    if not windows:
+        raise SkipSpeech('no_verified_speech_windows')
+    items = []
+    for item in data.get('transcription', []):
+        start, end = (int(item.get('offsets', {}).get(k, 0)) for k in ('from', 'to'))
+        overlaps = [(max(start, a), min(end, b)) for a, b in windows if max(start, a) < min(end, b)]
+        if not overlaps:
+            continue
+        a, b = max(overlaps, key=lambda p: p[1] - p[0])
+        items.append(dict(item, offsets={'from': a, 'to': b}))
+    return dict(data, transcription=items)
 
 
 def readable_cues(cues):
@@ -78,9 +106,10 @@ def readable_cues(cues):
 
 def build_from_audio(source, output):
     """No network audio upload: only recognized English text is translated."""
-    if not Path(CLI).is_file() or not Path(MODEL).is_file():
+    if not Path(CLI).is_file() or not Path(MODEL).is_file() or not Path(VAD_MODEL).is_file():
         raise SkipSpeech('speech_model_missing')
     directory = Path(output).parent
+    (directory / 'caption_layout.json').unlink(missing_ok=True)
     audio = directory / 'speech.wav'
     detection_log = directory / 'speech_detect.log'
     transcript_log = directory / 'speech_transcribe.log'
@@ -106,13 +135,20 @@ def build_from_audio(source, output):
         if not english_detection(detection_log.read_text(encoding='utf-8', errors='replace')):
             raise SkipSpeech('not_english_or_uncertain')
         with transcript_log.open('wb') as handle:
-            subprocess.run(command + ['-l', 'en', '-oj', '-ml', '60', '-sow', '-sns', '-of', str(transcript)],
+            subprocess.run(command + ['-l', 'en', '--vad', '-vm', VAD_MODEL, '-vsd', '500', '-vp', '50',
+                                      '-oj', '-ml', '40', '-sow', '-sns', '-of', str(transcript)],
                            stdout=subprocess.DEVNULL, stderr=handle, check=True, timeout=150)
         data = json.loads(transcript.with_suffix('.json').read_text(encoding='utf-8'))
+        data = respect_pauses(data, speech_windows(transcript_log.read_text(encoding='utf-8', errors='replace')))
         cues = transcript_cues(data, duration)
+        from burned_captions import source_captions
+        visual = source_captions(source, cues, duration, meta)
+        if visual:
+            cues, box, exact = visual
+            (directory / 'caption_layout.json').write_text(json.dumps({'box': box, 'source': 'burned' if exact else 'speech'}), encoding='utf-8')
         import requests
         with requests.Session() as session:
-            translated = readable_cues(translate_cues(cues, session))
+            translated = translate_cues(cues, session)
         # Escape SRT markup, including any text returned by the translation service.
         from html import escape
         srt = '\n\n'.join(f'{i}\n{srt_time(start)} --> {srt_time(end)}\n{escape(text, quote=False)}'
