@@ -196,6 +196,8 @@ def build_app(token=None, downloader_factory=None):
                                 path = converted
                             except Exception as exc:
                                 log.warning('Remote preparation failed: %s', type(exc).__name__)
+                                if target == 'discord' and os.path.getsize(path) > limit:
+                                    raise ValueError('discord_video_exceeds_upload_limit') from exc
                                 document = target == 'whatsapp'
                         if os.path.getsize(path) > 100 * 1024 * 1024:
                             raise ValueError('media too large')

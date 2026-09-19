@@ -67,6 +67,27 @@ class WhatsAppVideoTests(unittest.TestCase):
                                 '-f', 'null', '-'], check=True, capture_output=True)
                 self.assertTrue(source.exists())
 
+    def test_small_total_bitrate_keeps_audio_and_complete_duration(self):
+        # Same bits/second budget as the reported 451-second TikTok under 9.5 MiB.
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / 'source.mp4'
+            subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i',
+                            'testsrc2=size=640x360:rate=30', '-f', 'lavfi', '-i',
+                            'sine=frequency=440', '-t', '8', '-c:v', 'libx264',
+                            '-preset', 'ultrafast', '-crf', '10', '-c:a', 'aac', str(source)],
+                           check=True, capture_output=True)
+            budget = int(9961472 * 8 / 451)
+            output = prepare_video(str(source), max_bytes=budget)
+            self.assertLessEqual(Path(output).stat().st_size, budget)
+            probe = json.loads(subprocess.check_output(['ffprobe', '-v', 'error',
+                                '-show_streams', '-show_format', '-of', 'json', output]))
+            self.assertAlmostEqual(float(probe['format']['duration']), 8, delta=.15)
+            audio = next(s for s in probe['streams'] if s['codec_type'] == 'audio')
+            self.assertEqual(audio['codec_name'], 'aac')
+            self.assertEqual(audio['channels'], 1)
+            subprocess.run(['ffmpeg', '-v', 'error', '-xerror', '-i', output, '-f', 'null', '-'],
+                           check=True, capture_output=True)
+
     def test_invalid_download_leaves_no_output(self):
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / 'invalid.mp4'

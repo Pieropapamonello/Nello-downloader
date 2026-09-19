@@ -31,6 +31,13 @@ class SubtitleDownloader(FakeDownloader):
         return result
 
 
+class OversizedDownloader(FakeDownloader):
+    async def download_video(self, url):
+        result = await super().download_video(url)
+        Path(result['file_path']).write_bytes(b'x' * (2 * 1024 * 1024))
+        return result
+
+
 class RemoteTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         FakeDownloader.calls = 0
@@ -92,6 +99,19 @@ class RemoteTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(path.read_bytes(), b'test video payload')
         finally:
             path.unlink()
+
+    async def test_failed_discord_compression_does_not_report_oversized_video_ready(self):
+        await self.client.close()
+        self.client = TestClient(TestServer(build_app(TOKEN, OversizedDownloader)))
+        await self.client.start_server()
+        with patch('downloader_service.prepare_video', side_effect=ValueError('encode failed')), \
+             patch.dict(os.environ, {'DOWNLOADER_URL': str(self.client.make_url('')).rstrip('/'),
+                                    'DOWNLOADER_TOKEN': TOKEN}):
+            result = await remote_download('https://vm.tiktok.com/test/', target='discord',
+                                           max_bytes=1024 * 1024)
+        self.assertFalse(result['success'])
+        self.assertNotIn('file_path', result)
+        self.assertNotIn('_delivery_prepared', result)
 
 
 if __name__ == '__main__':

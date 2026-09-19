@@ -48,8 +48,12 @@ def prepare_video(path, timeout=180, max_bytes=16 * 1024 * 1024, subtitle_path=N
                     ['-c:a', 'aac', '-ac', '2', '-ar', '48000', '-b:a', '96k'])
         else:
             duration = float(metadata.get('format', {}).get('duration') or video.get('duration') or 0)
-            audio_rate = 96000 if audio else 0
-            rate = min(1200000, int(max_bytes * 8 * 0.85 / duration) - audio_rate) if duration > 0 else 800000
+            total_rate = int(max_bytes * 8 * 0.85 / duration) if duration > 0 else 896000
+            # Long videos under Discord's small upload cap need a smaller audio
+            # allocation too: fixed 96k audio could consume most of the budget.
+            audio_rate = (48000 if total_rate < 240000 else 96000) if audio else 0
+            audio_channels = 1 if audio_rate == 48000 else 2
+            rate = min(1200000, total_rate - audio_rate)
             if rate < 64000:
                 raise ValueError('video too long for WhatsApp size limit')
             side = 360 if rate < 400000 else 640
@@ -66,8 +70,8 @@ def prepare_video(path, timeout=180, max_bytes=16 * 1024 * 1024, subtitle_path=N
                 '-r', fps, '-c:v', 'libx264', '-threads', '1',
                 '-preset', 'ultrafast', '-b:v', str(rate), '-maxrate', str(rate),
                 '-bufsize', str(rate * 2), '-profile:v', 'baseline',
-                '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-ac', '2', '-ar', '48000',
-                '-b:a', '96k',
+                '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-ac', str(audio_channels), '-ar', '48000',
+                '-b:a', str(audio_rate or 96000),
             ]
         logger.info('WA video preparation: mode=%s input_bytes=%s codec=%s audio=%s dimensions=%sx%s',
                     'remux' if copy_streams else 'encode', os.path.getsize(path),
