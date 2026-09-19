@@ -4,10 +4,22 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 from dynamic_captions import chunks, make_ass
-from burned_captions import changing_band, matches_speech
+from burned_captions import changing_band, matches_speech, ocr
 
 
 class DynamicTests(unittest.TestCase):
+    def test_ocr_limits_threads_and_rejects_uncertain_words(self):
+        from PIL import Image
+        from types import SimpleNamespace
+        tsv = 'top\tconf\ttext\n16\t95\tWE\n16\t91\tPLAYED\n112\t20\tNOISE\n'
+        with tempfile.TemporaryDirectory() as directory:
+            with patch('burned_captions.subprocess.run', return_value=SimpleNamespace(stdout=tsv)) as run:
+                result = ocr([Image.new('L', (100, 30)), Image.new('L', (100, 30))],
+                             Path(directory) / 'ocr.png', timeout=12, confidence=55)
+        self.assertEqual(result, ['WE PLAYED', ''])
+        self.assertEqual(run.call_args.kwargs['env']['OMP_THREAD_LIMIT'], '1')
+        self.assertEqual(run.call_args.kwargs['timeout'], 12)
+
     def test_chunks_keep_words_and_timing_without_overlap(self):
         text = 'Una frase tradotta con tutte le parole al posto giusto'
         result = list(chunks([(1200, 6800, text)]))
