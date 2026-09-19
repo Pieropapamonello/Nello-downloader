@@ -14,7 +14,7 @@ RUN curl -fL --retry 3 https://huggingface.co/ggerganov/whisper.cpp/resolve/main
 FROM python:3.11-slim
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg fonts-dejavu-core git curl ca-certificates gnupg unzip gcc \
+    ffmpeg fonts-dejavu-core tesseract-ocr tesseract-ocr-eng git curl ca-certificates gnupg unzip gcc \
  && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
  && apt-get install -y --no-install-recommends nodejs \
  && rm -rf /var/lib/apt/lists/*

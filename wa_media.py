@@ -64,7 +64,9 @@ def prepare_video(path, timeout=180, max_bytes=16 * 1024 * 1024, subtitle_path=N
                 # Fixed filename plus cwd avoids filter escaping and path injection.
                 if os.path.basename(subtitle_path) != 'italian.srt' or os.path.dirname(os.path.abspath(subtitle_path)) != os.path.dirname(os.path.abspath(path)):
                     raise ValueError('subtitle file outside media directory')
-                filters += ",subtitles=italian.srt:force_style='FontName=DejaVu Sans,FontSize=12,Outline=1.5,Shadow=0,MarginV=24,MarginL=12,MarginR=12'"
+                from dynamic_captions import make_ass
+                make_ass(subtitle_path, path, duration, video['width'], video['height'])
+                filters += ',ass=italian.ass'
             cmd += [
                 '-vf', filters,
                 '-r', fps, '-c:v', 'libx264', '-threads', '1',

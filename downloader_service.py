@@ -207,7 +207,7 @@ def build_app(token=None, downloader_factory=None):
                     result.pop('file_path', None)
                     result.pop('files', None)
                     result['media'] = descriptors
-                    result['video_processing_version'] = 2
+                    result['video_processing_version'] = 3
                     result['_delivery_prepared'] = target in ('whatsapp', 'discord')
                 job['result'] = result
                 if platform and cookie_version == inspect_content(read_content(platform), platform)['version']:
