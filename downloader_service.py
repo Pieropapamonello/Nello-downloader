@@ -151,14 +151,14 @@ def build_app(token=None, downloader_factory=None):
                 if result.get('success'):
                     subtitle_meta = result.pop('_subtitle_meta', None)
                     subtitle_path = None
-                    if subtitle_meta:
+                    if subtitle_meta and body.get('subtitles', True):
                         try:
                             subtitle_path = await asyncio.to_thread(prepare_subtitles, subtitle_meta, directory.name)
                         except Exception as exc:
                             log.info('Optional subtitles skipped: %s', type(exc).__name__)
                     result['subtitles'] = 'unavailable' if not subtitle_path else 'pending'
                     paths = ([result['file_path']] if result.get('file_path') else result.get('files', []))
-                    if (not subtitle_path and result.get('type') == 'video' and body.get('kind') != 'audio'
+                    if (body.get('subtitles', True) and not subtitle_path and result.get('type') == 'video' and body.get('kind') != 'audio'
                             and len(paths) == 1 and Path(paths[0]).suffix.lower() in VIDEO_EXTS
                             and downloader_factory is None):
                         source = Path(paths[0]).resolve()
