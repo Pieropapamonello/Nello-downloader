@@ -157,7 +157,9 @@ def source_captions(source, cues, duration, metadata):
             return cues, [0, a / height, 1, b / height], False
         log.info('Burned captions read: cues=%d coverage=%.2f seconds=%.1f', len(result), coverage, time.monotonic()-started)
         diagnostics['outcome'] = 'translated_visible_text'
-        return result, [0, a / height, 1, b / height], True
+        # The translation model was trained on prose, not all-caps graphics.
+        # Rendering restores uppercase after translation.
+        return [(s, e, text.capitalize()) for s, e, text in result], [0, a / height, 1, b / height], True
     except (subprocess.SubprocessError, OSError, ValueError) as exc:
         diagnostics['outcome'] = type(exc).__name__
         log.info('Burned captions unavailable: %s; use bottom captions', type(exc).__name__)
