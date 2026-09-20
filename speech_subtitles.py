@@ -7,6 +7,7 @@ import re
 import subprocess
 import sys
 import time
+import wave
 
 from subtitles import translate_cues, srt_time, TranslationUnavailable
 from youtube_job import memory_pressure, stop_job
@@ -17,6 +18,7 @@ MIN_ENGLISH_PROBABILITY = 0.85
 MODEL = os.getenv('WHISPER_MODEL', '/opt/whisper/ggml-tiny-q5_1.bin')
 CLI = os.getenv('WHISPER_CLI', '/opt/whisper/whisper-cli')
 VAD_MODEL = os.getenv('WHISPER_VAD_MODEL', '/opt/whisper/ggml-silero-v5.1.2.bin')
+MULTILINGUAL_MODEL = os.getenv('WHISPER_MULTILINGUAL_MODEL', '/opt/whisper/ggml-base-q5_1.bin')
 
 
 class SkipSpeech(Exception):
@@ -31,9 +33,17 @@ def english_detection(output):
     return code == 'en' and float(confidence) >= MIN_ENGLISH_PROBABILITY
 
 
-def transcript_cues(data, duration):
-    if data.get('result', {}).get('language') != 'en':
-        raise SkipSpeech('not_english')
+def foreign_language(output):
+    matches = re.findall(r'auto-detected language:\s*([a-z]+)\s*\(p\s*=\s*([\d.]+)\)', output)
+    if not matches:
+        return None
+    code, confidence = matches[-1]
+    return code if code != 'it' and float(confidence) >= .40 else None
+
+
+def transcript_cues(data, duration, source_language='en'):
+    if data.get('result', {}).get('language') != source_language:
+        raise SkipSpeech('unexpected_transcript_language')
     cues = []
     for item in data.get('transcription', []):
         start, end = (int(item.get('offsets', {}).get(key, 0)) for key in ('from', 'to'))
@@ -132,23 +142,49 @@ def build_from_audio(source, output):
         with detection_log.open('wb') as handle:
             subprocess.run(command + ['-l', 'auto', '-dl', '-d', '12000'],
                            stdout=subprocess.DEVNULL, stderr=handle, check=True, timeout=45)
-        if not english_detection(detection_log.read_text(encoding='utf-8', errors='replace')):
-            raise SkipSpeech('not_english_or_uncertain')
-        with transcript_log.open('wb') as handle:
-            subprocess.run(command + ['-l', 'en', '--vad', '-vm', VAD_MODEL, '-vsd', '500', '-vp', '50',
-                                      '-oj', '-ml', '40', '-sow', '-sns', '-of', str(transcript)],
-                           stdout=subprocess.DEVNULL, stderr=handle, check=True, timeout=150)
-        data = json.loads(transcript.with_suffix('.json').read_text(encoding='utf-8'))
-        data = respect_pauses(data, speech_windows(transcript_log.read_text(encoding='utf-8', errors='replace')))
-        cues = transcript_cues(data, duration)
+        source_language = foreign_language(detection_log.read_text(encoding='utf-8', errors='replace'))
+        if not source_language:
+            raise SkipSpeech('italian_or_uncertain')
+        parts = [(audio, duration, 0)]
+        if source_language != 'en':
+            if not Path(MULTILINGUAL_MODEL).is_file():
+                raise SkipSpeech('multilingual_model_unavailable')
+            command[command.index('-m') + 1] = MULTILINGUAL_MODEL
+            # The larger multilingual model runs on short chunks, sequentially.
+            parts = []
+            with wave.open(str(audio), 'rb') as original:
+                offset = 0
+                while frames := original.readframes(20 * 16000):
+                    part = directory / f'speech_part_{offset}.wav'
+                    with wave.open(str(part), 'wb') as out:
+                        out.setparams(original.getparams())
+                        out.writeframes(frames)
+                    seconds = len(frames) / 32000
+                    parts.append((part, seconds, offset))
+                    offset += round(seconds * 1000)
+        cues = []
+        for part, seconds, offset in parts:
+            command[command.index('-f') + 1] = str(part)
+            with transcript_log.open('wb') as handle:
+                subprocess.run(command + ['-l', source_language, '--vad', '-vm', VAD_MODEL, '-vsd', '500', '-vp', '50',
+                                          '-oj', '-ml', '40', '-sow', '-sns', '-of', str(transcript)],
+                               stdout=subprocess.DEVNULL, stderr=handle, check=True, timeout=150)
+            data = json.loads(transcript.with_suffix('.json').read_text(encoding='utf-8'))
+            windows = speech_windows(transcript_log.read_text(encoding='utf-8', errors='replace'))
+            if not windows:
+                continue
+            data = respect_pauses(data, windows)
+            cues.extend((a+offset, b+offset, t) for a,b,t in transcript_cues(data, seconds, source_language))
+        if not cues:
+            raise SkipSpeech('no_clear_speech')
         from burned_captions import source_captions
-        visual = source_captions(source, cues, duration, meta)
+        visual = source_captions(source, cues, duration, meta) if source_language == 'en' else None
         if visual:
             cues, box, exact = visual
             (directory / 'caption_layout.json').write_text(json.dumps({'box': box, 'source': 'burned' if exact else 'speech'}), encoding='utf-8')
         import requests
         with requests.Session() as session:
-            translated = translate_cues(cues, session)
+            translated = translate_cues(cues, session, source_language)
         # Escape SRT markup, including any text returned by the translation service.
         from html import escape
         srt = '\n\n'.join(f'{i}\n{srt_time(start)} --> {srt_time(end)}\n{escape(text, quote=False)}'
@@ -158,9 +194,11 @@ def build_from_audio(source, output):
     finally:
         for path in (audio, detection_log, transcript_log, transcript.with_suffix('.json')):
             path.unlink(missing_ok=True)
+        for path in directory.glob('speech_part_*.wav'):
+            path.unlink(missing_ok=True)
 
 
-def prepare_spoken_subtitles(source, directory, timeout=240):
+def prepare_spoken_subtitles(source, directory, timeout=360):
     """Supervise the entire ASR process group after the downloader has exited."""
     if memory_pressure():
         log.info('Speech subtitles skipped: memory pressure before start')
@@ -196,7 +234,7 @@ if __name__ == '__main__':
     reason, ok = 'unknown', False
     try:
         build_from_audio(sys.argv[1], sys.argv[2])
-        reason, ok = 'translated_english_audio', True
+        reason, ok = 'translated_foreign_audio', True
     except SkipSpeech as exc:
         reason = str(exc)
     except TranslationUnavailable as exc:

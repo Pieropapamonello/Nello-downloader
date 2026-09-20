@@ -18,13 +18,24 @@ class CaptionTests(unittest.TestCase):
     def test_english_requires_source_language_not_title_or_translation(self):
         base = {'subtitles': {'en': [TRACK], 'it': [TRACK]}, 'duration': 3,
                 'title': 'This is an English title'}
-        for lang in ('', 'it', 'fr'):
+        for lang in ('', 'it'):
             self.assertEqual(caption_metadata(dict(base, language=lang)), {})
+        self.assertEqual(caption_metadata(dict(base, language='fr'))['language'], 'fr')
         self.assertEqual(caption_metadata(dict(base, language='en-US'))['language'], 'en')
         info = dict(base, automatic_captions={'en-orig': [TRACK]})
         self.assertEqual(caption_metadata(info)['language'], 'en')
         info['requested_formats'] = [{'acodec': 'aac', 'language': 'it'}]
         self.assertEqual(caption_metadata(info), {})
+
+    def test_foreign_track_uses_its_language_not_english_model(self):
+        session = MagicMock()
+        session.get.return_value.__enter__.return_value.json.return_value = {
+            'responseStatus': 200, 'responseData': {'translatedText': 'Buongiorno a tutti'}}
+        with patch('local_translation.available', return_value=True), patch('local_translation.translate') as local:
+            self.assertEqual(translate_cues([(0, 1000, 'Bonjour tout le monde')], session, 'fr'),
+                             [(0, 1000, 'Buongiorno a tutti')])
+            local.assert_not_called()
+        self.assertEqual(session.get.call_args.kwargs['params']['langpair'], 'fr|it')
 
     def test_tiktok_automatic_translation_is_not_spoken_language(self):
         data = {'video': {'subtitleInfos': [

@@ -78,6 +78,8 @@ class VoiceApiTests(unittest.IsolatedAsyncioTestCase):
         async with TestClient(TestServer(build_app(token))) as client:
             ident = str(uuid.uuid4())
             self.assertEqual((await client.post('/voice-jobs/' + ident, data=b'voice bytes')).status, 401)
+            self.assertEqual((await client.post('/subtitle-jobs/' + ident, data=b'video bytes')).status, 401)
+            self.assertEqual((await client.post('/subtitle-jobs/' + ident, data=b'not an MP4', headers=headers)).status, 400)
             with patch('downloader_service.run_voice_job', side_effect=fake):
                 self.assertEqual((await client.post('/voice-jobs/' + ident, data=b'voice bytes', headers=headers)).status, 202)
                 for _ in range(100):

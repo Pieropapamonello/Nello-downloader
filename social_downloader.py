@@ -462,7 +462,7 @@ class SocialMediaDownloader(TikTokMixin, InstagramMixin, FacebookMixin, CobaltMi
         # Extract caption metadata with the existing page request, not a second download.
         opts['writesubtitles'] = True
         opts['writeautomaticsub'] = True
-        opts['subtitleslangs'] = ['en.*', 'eng.*', 'it.*', 'ita.*']
+        opts['subtitleslangs'] = ['all', '-live_chat']
 
         loop = asyncio.get_event_loop()
 

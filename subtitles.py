@@ -24,7 +24,9 @@ class TranslationUnavailable(ValueError):
 
 def language(code):
     base = str(code or '').lower().replace('_', '-').split('-')[0]
-    return {'eng': 'en', 'ita': 'it'}.get(base, base)
+    return {'eng': 'en', 'ita': 'it', 'spa': 'es', 'fra': 'fr', 'fre': 'fr',
+            'deu': 'de', 'ger': 'de', 'por': 'pt', 'jpn': 'ja', 'zho': 'zh',
+            'chi': 'zh', 'kor': 'ko', 'rus': 'ru', 'ara': 'ar'}.get(base, base)
 
 
 def tiktok_source_language(data):
@@ -49,13 +51,13 @@ def caption_metadata(info):
         original = {language(k) for k in auto if k.endswith('-orig')}
         if len(original) == 1:
             source = original.pop()
-    if source != 'en':
+    if not source or source == 'it':
         return {}
     selected = {}
     for group in (info.get('subtitles') or {}, auto):
         for code, tracks in group.items():
             lang = language(code)
-            if lang not in ('en', 'it'):
+            if lang not in (source, 'it'):
                 continue
             for track in tracks or []:
                 if track.get('ext') not in ('vtt', 'srt', 'json3'):
@@ -136,13 +138,18 @@ def fetch_track(track, session):
     return parse_captions(content, track['ext'])
 
 
-def translate_cues(cues, session):
+def translate_cues(cues, session, source_language='en'):
     """Batch short lines without losing cue alignment; no partial translations."""
     texts = list(dict.fromkeys(c[2] for c in cues))
     if sum(len(t) for t in texts) > MAX_TEXT:
         raise ValueError('free translation budget exceeded')
     from local_translation import available, translate
-    if available():
+    source_language = language(source_language)
+    if not re.fullmatch(r'[a-z]{2,3}', source_language):
+        raise ValueError('invalid source language')
+    if source_language == 'it':
+        return cues
+    if source_language == 'en' and available():
         return translate(cues)
     batches, batch = [], []
     for text in texts:
@@ -163,7 +170,7 @@ def translate_cues(cues, session):
             try:
                 if candidate == 'mymemory':
                     with session.get('https://api.mymemory.translated.net/get',
-                                     params={'q': '\n'.join(batch), 'langpair': 'en|it'}, timeout=(5, 10)) as response:
+                                     params={'q': '\n'.join(batch), 'langpair': source_language + '|it'}, timeout=(5, 10)) as response:
                         response.raise_for_status()
                         data = response.json()
                     value = data.get('responseData', {}).get('translatedText')
@@ -172,7 +179,7 @@ def translate_cues(cues, session):
                 else:
                     # Same public endpoint used by googletrans, not a billable Cloud API.
                     with session.get('https://translate.googleapis.com/translate_a/single',
-                                     params={'client': 'gtx', 'sl': 'en', 'tl': 'it', 'dt': 't',
+                                     params={'client': 'gtx', 'sl': source_language, 'tl': 'it', 'dt': 't',
                                              'q': '\n'.join(batch)}, timeout=(5, 10)) as response:
                         response.raise_for_status()
                         data = response.json()
@@ -183,7 +190,7 @@ def translate_cues(cues, session):
                     result = []
                     for cue in batch:
                         with session.get('https://translate.googleapis.com/translate_a/single',
-                                         params={'client': 'gtx', 'sl': 'en', 'tl': 'it', 'dt': 't', 'q': cue},
+                                         params={'client': 'gtx', 'sl': source_language, 'tl': 'it', 'dt': 't', 'q': cue},
                                          timeout=(5, 10)) as response:
                             response.raise_for_status()
                             data = response.json()
@@ -210,7 +217,8 @@ def srt_time(ms):
 
 
 def build_subtitles(meta, output):
-    if meta.get('language') != 'en' or not 0 < float(meta.get('duration') or 0) <= MAX_DURATION:
+    source_language = language(meta.get('language'))
+    if not source_language or source_language == 'it' or not 0 < float(meta.get('duration') or 0) <= MAX_DURATION:
         return False
     import requests
     with requests.Session() as session:
@@ -235,14 +243,14 @@ def build_subtitles(meta, output):
                 except Exception as exc:
                     Path(output).with_name('caption_layout.json').unlink(missing_ok=True)
                     log.info('Native burned caption detection skipped: %s', type(exc).__name__)
-        for lang in ('it', 'en'):
+        for lang in ('it', source_language):
             for track in meta.get('tracks', {}).get(lang, [])[:2]:
                 try:
                     cues = fetch_track(track, session)
                     if not cues:
                         continue
-                    if lang == 'en':
-                        cues = translate_cues(cues, session)
+                    if lang != 'it':
+                        cues = translate_cues(cues, session, source_language)
                     text = '\n\n'.join(f'{i}\n{srt_time(start)} --> {srt_time(end)}\n{html.escape(value, quote=False)}'
                                        for i, (start, end, value) in enumerate(cues, 1)) + '\n'
                     Path(output).write_text(text, encoding='utf-8')

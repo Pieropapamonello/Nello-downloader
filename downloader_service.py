@@ -16,6 +16,7 @@ from media_worker import run_media_job
 from wa_media import prepare_video
 from subtitles import prepare_subtitles
 from speech_subtitles import prepare_spoken_subtitles
+from screen_captions import prepare_screen_subtitles
 from voice_transcription import run_voice_job, MAX_BYTES as MAX_VOICE_BYTES
 VIDEO_EXTS = ('.mp4', '.mov', '.webm', '.mkv', '.avi', '.flv', '.ts')
 
@@ -109,6 +110,8 @@ def build_app(token=None, downloader_factory=None):
         return web.json_response({k: job[k] for k in ('state', 'result') if k in job})
 
     async def submit_voice(request):
+        caption_upload = request.path.startswith('/subtitle-jobs/')
+        upload_limit = 20 * 1024 * 1024 if caption_upload else MAX_VOICE_BYTES
         try:
             ident = str(uuid.UUID(request.match_info['ident']))
         except ValueError:
@@ -118,20 +121,24 @@ def build_app(token=None, downloader_factory=None):
         if queue.full() or len(jobs) >= 32:
             raise web.HTTPServiceUnavailable()
         directory = tempfile.TemporaryDirectory(prefix='voice_job_')
-        job = {'state': 'uploading', 'body': {'kind': 'voice', 'url': ''},
+        job = {'state': 'uploading', 'body': {'kind': 'caption_upload' if caption_upload else 'voice', 'url': '', 'target': 'whatsapp'},
                'created': time.monotonic(), 'directory': directory, 'paths': []}
         jobs[ident] = job
         try:
             size = 0
-            with open(os.path.join(directory.name, 'input.audio'), 'wb') as output:
+            with open(os.path.join(directory.name, 'input.mp4' if caption_upload else 'input.audio'), 'wb') as output:
                 async with asyncio.timeout(60):
                     async for chunk in request.content.iter_chunked(65536):
                         size += len(chunk)
-                        if size > MAX_VOICE_BYTES:
-                            raise web.HTTPRequestEntityTooLarge(max_size=MAX_VOICE_BYTES, actual_size=size)
+                        if size > upload_limit:
+                            raise web.HTTPRequestEntityTooLarge(max_size=upload_limit, actual_size=size)
                         output.write(chunk)
             if not size:
                 raise web.HTTPBadRequest()
+            if caption_upload:
+                with open(os.path.join(directory.name, 'input.mp4'), 'rb') as uploaded:
+                    if uploaded.read(8)[4:8] != b'ftyp':
+                        raise web.HTTPBadRequest(text='MP4 upload required')
             if queue.full():
                 raise web.HTTPServiceUnavailable()
             job['state'] = 'queued'
@@ -180,7 +187,9 @@ def build_app(token=None, downloader_factory=None):
                         directory.cleanup()
                     continue
                 target = body.get('target', '')
-                if downloader_factory is None:
+                if body.get('kind') == 'caption_upload':
+                    result = {'success': True, 'type': 'video', 'file_path': os.path.join(directory.name, 'input.mp4')}
+                elif downloader_factory is None:
                     result = await asyncio.to_thread(run_media_job, body, directory.name)
                 else:
                     # Injected downloader for API contract tests.
@@ -193,15 +202,22 @@ def build_app(token=None, downloader_factory=None):
                     paths = ([result['file_path']] if result.get('file_path') else result.get('files', []))
                     subtitle_meta = result.pop('_subtitle_meta', None)
                     subtitle_path = None
-                    if subtitle_meta and body.get('subtitles', True):
+                    already_italian = False
+                    if (body.get('subtitles', True) and result.get('type') == 'video'
+                            and body.get('kind') != 'audio' and len(paths) == 1 and downloader_factory is None):
+                        source = Path(paths[0]).resolve()
+                        if not source.is_relative_to(Path(directory.name).resolve()):
+                            raise ValueError('media outside job directory')
+                        subtitle_path, already_italian = await asyncio.to_thread(prepare_screen_subtitles, str(source), directory.name)
+                    if subtitle_meta and body.get('subtitles', True) and not subtitle_path and not already_italian:
                         try:
                             source = paths[0] if len(paths) == 1 else None
                             subtitle_path = await asyncio.to_thread(prepare_subtitles, subtitle_meta, directory.name, source=source)
                         except Exception as exc:
                             log.info('Optional subtitles skipped: %s', type(exc).__name__)
-                    result['subtitles'] = 'unavailable' if not subtitle_path else 'pending'
+                    result['subtitles'] = 'already_it' if already_italian else ('unavailable' if not subtitle_path else 'pending')
                     paths = ([result['file_path']] if result.get('file_path') else result.get('files', []))
-                    if (body.get('subtitles', True) and not subtitle_path and result.get('type') == 'video' and body.get('kind') != 'audio'
+                    if (body.get('subtitles', True) and not subtitle_path and not already_italian and result.get('type') == 'video' and body.get('kind') != 'audio'
                             and len(paths) == 1 and Path(paths[0]).suffix.lower() in VIDEO_EXTS
                             and downloader_factory is None):
                         source = Path(paths[0]).resolve()
@@ -250,7 +266,7 @@ def build_app(token=None, downloader_factory=None):
                     result.pop('file_path', None)
                     result.pop('files', None)
                     result['media'] = descriptors
-                    result['video_processing_version'] = 5
+                    result['video_processing_version'] = 6
                     result['_delivery_prepared'] = target in ('whatsapp', 'discord')
                 job['result'] = result
                 if platform and cookie_version == inspect_content(read_content(platform), platform)['version']:
@@ -286,6 +302,7 @@ def build_app(token=None, downloader_factory=None):
         return web.json_response({'status': 'ok', 'queued': queue.qsize()})
     app.add_routes([web.get('/healthz', health), web.post('/jobs', submit),
                     web.post('/voice-jobs/{ident}', submit_voice),
+                    web.post('/subtitle-jobs/{ident}', submit_voice),
                     web.get('/admin/cookies', cookie_status),
                     web.put('/admin/cookies/{platform}', update_cookie),
                     web.get('/jobs/{ident}', status), web.delete('/jobs/{ident}', remove),

@@ -4,10 +4,18 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 from speech_subtitles import (english_detection, transcript_cues, readable_cues, SkipSpeech,
-                              prepare_spoken_subtitles, speech_windows, respect_pauses)
+                              prepare_spoken_subtitles, speech_windows, respect_pauses, foreign_language)
 
 
 class SpeechTests(unittest.TestCase):
+    def test_foreign_speech_supported_italian_and_uncertain_skipped(self):
+        for code in ('en', 'fr', 'es', 'de', 'ja', 'ar'):
+            self.assertEqual(foreign_language(f'auto-detected language: {code} (p = 0.99)'), code)
+        self.assertIsNone(foreign_language('auto-detected language: it (p = 0.99)'))
+        self.assertIsNone(foreign_language('auto-detected language: fr (p = 0.30)'))
+        data = {'result': {'language': 'fr'}, 'transcription': [
+            {'offsets': {'from': 0, 'to': 1000}, 'text': 'Hello everyone.'}]}
+        self.assertEqual(transcript_cues(data, 1, 'fr'), [(0, 1000, 'Hello everyone.')])
     def test_long_pause_is_not_filled_or_merged(self):
         windows = speech_windows('VAD segment 0: start = 0.10, end = 6.39\nVAD segment 1: start = 14.41, end = 18.00')
         data = {'result': {'language': 'en'}, 'transcription': [
