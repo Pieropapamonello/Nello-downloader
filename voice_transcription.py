@@ -24,7 +24,7 @@ def detected_language(output):
 
 def italian_detection(output, seconds=30):
     language, confidence = detected_language(output)
-    return language == 'it' and confidence >= (.55 if seconds <= 8 else .85)
+    return language == 'it' and confidence >= (.40 if seconds <= 8 else .85)
 
 
 def transcript_text(data, windows):
@@ -60,8 +60,9 @@ def transcribe(source):
                     '-vn', '-t', str(MAX_SECONDS + 1), '-ac', '1', '-ar', '16000',
                     '-c:a', 'pcm_s16le', str(audio)], check=True, capture_output=True, timeout=25)
     command = [CLI, '-m', MODEL, '-t', '1', '-ng', '-bo', '1', '-bs', '1', '-nf']
-    # Check each 30-second window, not just the opening of a long voice note.
-    # whisper.cpp detects language before applying -ot; use separate WAV chunks.
+    # Decode bounded chunks in separate processes: long VAD buffers otherwise
+    # exceed the free worker's RAM. Nothing is returned before every chunk passes.
+    texts = []
     with wave.open(str(audio), 'rb') as original:
         while frames := original.readframes(30 * 16000):
             sample = directory / 'language_sample.wav'
@@ -76,20 +77,21 @@ def transcribe(source):
                 reason = 'not_italian' if language and language != 'it' and confidence >= .55 else 'uncertain_language'
                 return {'success': True, 'skipped': reason, 'detected_language': language,
                         'confidence': round(confidence, 3)}
-    output = directory / 'voice_transcript'
-    # VAD can remove the initial words of a 2-second note. Once its language
-    # has passed the gate, decode the whole short clip without cutting it.
-    vad = ['--vad', '-vm', VAD_MODEL, '-vsd', '500', '-vp', '50'] if duration > 8 else []
-    result = subprocess.run(command + ['-f', str(audio), '-l', 'it'] + vad + ['-sns', '-oj', '-of', str(output)],
-                            check=True, capture_output=True, text=True, timeout=300)
-    data = json.loads(output.with_suffix('.json').read_text(encoding='utf-8'))
-    windows = speech_windows(result.stderr) if vad else [(0, round(duration * 1000))]
-    text = transcript_text(data, windows)
-    return ({'success': True, 'language': 'it', 'text': text} if text else
+            output = directory / 'voice_transcript'
+            vad = ['--vad', '-vm', VAD_MODEL, '-vsd', '500', '-vp', '50'] if seconds > 8 else []
+            result = subprocess.run(command + ['-f', str(sample), '-l', 'it'] + vad + ['-sns', '-oj', '-of', str(output)],
+                                    check=True, capture_output=True, text=True, timeout=150)
+            data = json.loads(output.with_suffix('.json').read_text(encoding='utf-8'))
+            windows = speech_windows(result.stderr) if vad else [(0, round(seconds * 1000))]
+            text = transcript_text(data, windows)
+            if text:
+                texts.append(text)
+    text = ' '.join(texts)
+    return ({'success': True, 'language': 'it', 'text': text} if text and len(text) <= 15000 else
             {'success': True, 'skipped': 'no_clear_speech'})
 
 
-def run_voice_job(source, timeout=420):
+def run_voice_job(source, timeout=600):
     """Shares the downloader's serial queue; never loads a model in the bot."""
     if memory_pressure():
         return {'success': False, 'reason': 'resource_limit'}

@@ -18,7 +18,8 @@ class VoiceTests(unittest.TestCase):
             self.assertFalse(italian_detection(text))
         self.assertTrue(italian_detection('auto-detected language: it (p = 0.70)', seconds=3))
         self.assertFalse(italian_detection('auto-detected language: en (p = 0.99)', seconds=3))
-        self.assertFalse(italian_detection('auto-detected language: it (p = 0.40)', seconds=3))
+        self.assertTrue(italian_detection('auto-detected language: it (p = 0.45)', seconds=5))
+        self.assertFalse(italian_detection('auto-detected language: it (p = 0.30)', seconds=3))
 
     def test_silence_and_non_italian_never_produce_text(self):
         data = {'result': {'language': 'it'}, 'transcription': [
@@ -46,7 +47,14 @@ class VoiceTests(unittest.TestCase):
                         out.setparams((1, 2, 16000, 0, 'NONE', 'not compressed'))
                         out.writeframes(b'\x01\x00' * 30 * 16000 + b'\x02\x00' * 5 * 16000)
                     return SimpleNamespace()
-                self.assertIn('-dl', command)
+                if '-dl' not in command:
+                    import json
+                    with wave.open(command[command.index('-f') + 1], 'rb') as wav:
+                        self.assertLessEqual(wav.getnframes(), 30 * 16000)
+                    Path(command[command.index('-of') + 1] + '.json').write_text(json.dumps({
+                        'result': {'language': 'it'}, 'transcription': [
+                            {'offsets': {'from': 0, 'to': 1000}, 'text': 'Ciao ragazzi.'}]}))
+                    return SimpleNamespace(stderr='VAD segment 0: start = 0.00, end = 1.00')
                 with wave.open(command[command.index('-f') + 1], 'rb') as wav:
                     samples.append(wav.readframes(1))
                 lang = 'it' if len(samples) == 1 else 'en'
