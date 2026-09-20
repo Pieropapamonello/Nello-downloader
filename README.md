@@ -108,6 +108,6 @@ al protocollo API.
 
 ### Trascrizione automatica dei vocali italiani
 
-Telegram, WhatsApp e Discord rispondono ai messaggi audio riconosciuti come italiani con il testo della trascrizione. Le altre lingue e gli audio incerti non generano risposte. Nessuna traduzione degli audio stranieri. Il messaggio originale resta disponibile.
+Telegram, WhatsApp e Discord rispondono ai messaggi audio riconosciuti come italiani con il testo della trascrizione. Le altre lingue non vengono trascritte. Se parole o lingua sono incerte, il bot risponde con un breve avviso. Nessuna traduzione degli audio stranieri. Il messaggio originale resta disponibile.
 
 Il riconoscitore Whisper locale usa la coda seriale del downloader e non richiede nuove chiavi o servizi a pagamento. Limiti per Render Free: 3 minuti e 8 MB per audio; massimo 3 richieste vocali contemporaneamente in attesa dal bot. I file temporanei vengono eliminati dopo il riconoscimento, senza salvare il testo nei log o nella cache dei social. Serve la configurazione DOWNLOADER_URL/DOWNLOADER_TOKEN gia usata per i video. La precisione dipende dalla chiarezza della voce e dal rilevamento della lingua.

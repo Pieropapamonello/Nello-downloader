@@ -17,9 +17,14 @@ MAX_SECONDS = 180
 log = logging.getLogger(__name__)
 
 
-def italian_detection(output):
+def detected_language(output):
     matches = re.findall(r'auto-detected language:\s*([a-z]+)\s*\(p\s*=\s*([\d.]+)\)', output)
-    return bool(matches) and matches[-1][0] == 'it' and float(matches[-1][1]) >= .85
+    return (matches[-1][0], float(matches[-1][1])) if matches else ('', 0.0)
+
+
+def italian_detection(output, seconds=30):
+    language, confidence = detected_language(output)
+    return language == 'it' and confidence >= (.55 if seconds <= 8 else .85)
 
 
 def transcript_text(data, windows):
@@ -65,14 +70,21 @@ def transcribe(source):
                 output.writeframes(frames)
             detected = subprocess.run(command + ['-f', str(sample), '-l', 'auto', '-dl'],
                                       check=True, capture_output=True, text=True, timeout=45)
-            if not italian_detection(detected.stderr):
-                return {'success': True, 'skipped': 'not_italian_or_uncertain'}
+            seconds = len(frames) / (original.getsampwidth() * original.getnchannels() * original.getframerate())
+            language, confidence = detected_language(detected.stderr)
+            if not italian_detection(detected.stderr, seconds):
+                reason = 'not_italian' if language and language != 'it' and confidence >= .55 else 'uncertain_language'
+                return {'success': True, 'skipped': reason, 'detected_language': language,
+                        'confidence': round(confidence, 3)}
     output = directory / 'voice_transcript'
-    result = subprocess.run(command + ['-f', str(audio), '-l', 'it', '--vad', '-vm', VAD_MODEL, '-vsd', '500',
-                            '-vp', '50', '-sns', '-oj', '-of', str(output)],
+    # VAD can remove the initial words of a 2-second note. Once its language
+    # has passed the gate, decode the whole short clip without cutting it.
+    vad = ['--vad', '-vm', VAD_MODEL, '-vsd', '500', '-vp', '50'] if duration > 8 else []
+    result = subprocess.run(command + ['-f', str(audio), '-l', 'it'] + vad + ['-sns', '-oj', '-of', str(output)],
                             check=True, capture_output=True, text=True, timeout=300)
     data = json.loads(output.with_suffix('.json').read_text(encoding='utf-8'))
-    text = transcript_text(data, speech_windows(result.stderr))
+    windows = speech_windows(result.stderr) if vad else [(0, round(duration * 1000))]
+    text = transcript_text(data, windows)
     return ({'success': True, 'language': 'it', 'text': text} if text else
             {'success': True, 'skipped': 'no_clear_speech'})
 
@@ -93,7 +105,11 @@ def run_voice_job(source, timeout=420):
             time.sleep(.1)
         if proc.returncode != 0 or not report.is_file():
             return {'success': False, 'reason': 'recognition_failed'}
-        return json.loads(report.read_text(encoding='utf-8'))
+        result = json.loads(report.read_text(encoding='utf-8'))
+        log.info('Voice outcome: status=%s language=%s confidence=%s',
+                 result.get('skipped') or result.get('reason') or 'transcribed',
+                 result.get('detected_language') or result.get('language'), result.get('confidence'))
+        return result
     finally:
         if proc.poll() is None:
             stop_job(proc)

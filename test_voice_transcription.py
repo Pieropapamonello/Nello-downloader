@@ -16,6 +16,9 @@ class VoiceTests(unittest.TestCase):
                      'auto-detected language: es (p = 0.99)',
                      'auto-detected language: it (p = 0.50)', ''):
             self.assertFalse(italian_detection(text))
+        self.assertTrue(italian_detection('auto-detected language: it (p = 0.70)', seconds=3))
+        self.assertFalse(italian_detection('auto-detected language: en (p = 0.99)', seconds=3))
+        self.assertFalse(italian_detection('auto-detected language: it (p = 0.40)', seconds=3))
 
     def test_silence_and_non_italian_never_produce_text(self):
         data = {'result': {'language': 'it'}, 'transcription': [
@@ -51,7 +54,7 @@ class VoiceTests(unittest.TestCase):
             with patch('voice_transcription.Path.is_file', return_value=True), \
                  patch('voice_transcription.subprocess.check_output', return_value=b'{"format":{"duration":"35"},"streams":[{"codec_type":"audio"}]}'), \
                  patch('voice_transcription.subprocess.run', side_effect=fake_run):
-                self.assertEqual(transcribe(str(source))['skipped'], 'not_italian_or_uncertain')
+                self.assertEqual(transcribe(str(source))['skipped'], 'not_italian')
             self.assertEqual(samples, [b'\x01\x00', b'\x02\x00'])
 
 
