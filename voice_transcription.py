@@ -186,6 +186,10 @@ def run_voice_job(source, timeout=900):
         # The first process group is already stopped: models never overlap.
         log.info('Voice retry with lighter model: reason=%s', result['reason'])
         result = _voice_attempt(source, remaining, use_base=True)
+    remaining = timeout - (time.monotonic() - started)
+    if result.get('text') and result.get('language') == 'it' and remaining >= 5:
+        from voice_proofreading import proofread
+        result['text'] = format_transcript(proofread(result['text'], Path(source).parent, min(40, remaining)))
     return result
 
 

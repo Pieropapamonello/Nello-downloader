@@ -119,10 +119,15 @@ alla durata del blocco e un limite complessivo di 900 secondi. I tagli preferisc
 e non lasciano un frammento finale inferiore a 8 secondi. Tiny controlla la lingua;
 Base verifica i casi incerti prima di consentire una trascrizione italiana.
 Il testo viene normalizzato con spazi, maiuscole iniziali, paragrafi e correzioni
-ortografiche deterministiche (accenti/apostrofi). Non viene riassunto, inviato a
-correttori esterni o riscritto per indovinare parole incomprensibili. Nomi, orari e
-significato devono restare quelli riconosciuti. Non e una revisione grammaticale
-semantica: dialetto, concordanze ambigue e parole sbagliate possono restare.
+ortografiche deterministiche (accenti/apostrofi). LanguageTool 6.6 esegue poi un
+controllo italiano offline, dopo la chiusura di Whisper: processo temporaneo,
+heap massimo 160 MB, un processore e massimo 40 secondi. Si applicano soltanto
+correzioni grammaticali non ambigue e refusi minuscoli con una sola proposta
+e una sola modifica di carattere; nomi, numeri, negazioni e suggerimenti ambigui
+non vengono sostituiti. Non viene riassunto, inviato a correttori esterni o
+riscritto per indovinare parole incomprensibili. Un errore del correttore mantiene
+la trascrizione gia riuscita. Dialetto, concordanze ambigue e parole mal
+riconosciute possono comunque restare.
 Il modello piu accurato puo impiegare alcuni minuti su Render Free. Se supera
 il limite di memoria o il tempo disponibile, il processo viene chiuso prima
 di riprovare una sola volta con Base, entro il budget totale di 900 secondi.

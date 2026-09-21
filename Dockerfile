@@ -36,6 +36,12 @@ RUN curl -fL --retry 3 https://huggingface.co/ggerganov/whisper.cpp/resolve/main
  && echo '422f1ae452ade6f30a004d7e5c6a43195e4433bc370bf23fac9cc591f01a8898  /opt/whisper/ggml-base-q5_1.bin' | sha256sum -c -
 RUN curl -fL --retry 3 https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin -o /opt/whisper/ggml-silero-v5.1.2.bin \
  && echo '29940d98d42b91fbd05ce489f3ecf7c72f0a42f027e4875919a28fb4c04ea2cf  /opt/whisper/ggml-silero-v5.1.2.bin' | sha256sum -c -
+RUN apt-get update && apt-get install -y --no-install-recommends default-jre-headless \
+ && rm -rf /var/lib/apt/lists/* \
+ && curl -fL --retry 3 https://languagetool.org/download/LanguageTool-6.6.zip -o /tmp/proofreader.zip \
+ && echo '53600506b399bb5ffe1e4c8dec794fd378212f14aaf38ccef9b6f89314d11631  /tmp/proofreader.zip' | sha256sum -c - \
+ && mkdir -p /opt/proofreader && unzip -q /tmp/proofreader.zip -d /opt/proofreader \
+ && rm /tmp/proofreader.zip
 COPY fonts/ /usr/local/share/fonts/nello/
 COPY *.py ./
 COPY fonts/ ./fonts/
