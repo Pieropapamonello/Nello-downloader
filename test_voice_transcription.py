@@ -62,6 +62,18 @@ class VoiceTests(unittest.TestCase):
             self.assertFalse(run_voice_job('unused')['success'])
             proc.assert_not_called()
 
+    def test_resource_failure_retries_lighter_model_but_foreign_speech_does_not(self):
+        recovered = {'success': True, 'language': 'it', 'text': 'Ciao.'}
+        with patch('voice_transcription._voice_attempt', side_effect=[
+                {'success': False, 'reason': 'resource_limit'}, recovered]) as attempt:
+            self.assertEqual(run_voice_job('unused'), recovered)
+            self.assertEqual(attempt.call_count, 2)
+            self.assertTrue(attempt.call_args.kwargs['use_base'])
+        foreign = {'success': True, 'skipped': 'not_italian'}
+        with patch('voice_transcription._voice_attempt', return_value=foreign) as attempt:
+            self.assertEqual(run_voice_job('unused'), foreign)
+            attempt.assert_called_once()
+
     def test_language_detection_checks_later_audio_not_just_first_window(self):
         import wave
         from types import SimpleNamespace

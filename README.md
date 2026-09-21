@@ -112,7 +112,7 @@ Telegram, WhatsApp e Discord rispondono ai messaggi audio riconosciuti come ital
 
 Il riconoscitore Whisper locale usa la coda seriale del downloader e non richiede nuove chiavi o servizi a pagamento. Limiti per Render Free: 3 minuti e 8 MB per audio; massimo 3 richieste vocali contemporaneamente in attesa dal bot. I file temporanei vengono eliminati dopo il riconoscimento, senza salvare il testo nei log o nella cache dei social. Serve la configurazione DOWNLOADER_URL/DOWNLOADER_TOKEN gia usata per i video. La precisione dipende dalla chiarezza della voce e dal rilevamento della lingua.
 
-I vocali fino a 90 secondi usano Small Q5; quelli piu lunghi usano Base Q5
+I vocali fino a 90 secondi usano Small Q4_1; quelli piu lunghi usano Base Q5
 per contenere i tempi. Entrambi usano flash attention, un thread e processi
 separati per blocchi di massimo 20 secondi, con contesto audio proporzionato
 alla durata del blocco e un limite complessivo di 900 secondi. I tagli preferiscono le pause
@@ -123,7 +123,11 @@ ortografiche deterministiche (accenti/apostrofi). Non viene riassunto, inviato a
 correttori esterni o riscritto per indovinare parole incomprensibili. Nomi, orari e
 significato devono restare quelli riconosciuti. Non e una revisione grammaticale
 semantica: dialetto, concordanze ambigue e parole sbagliate possono restare.
-Il modello piu accurato puo impiegare alcuni minuti su Render Free.
+Il modello piu accurato puo impiegare alcuni minuti su Render Free. Se supera
+il limite di memoria o il tempo disponibile, il processo viene chiuso prima
+di riprovare una sola volta con Base, entro il budget totale di 900 secondi.
+La variante Q4_1 riduce di circa 30 MB i pesi rispetto a Small Q5; il download
+e vincolato a una revisione e a un checksum SHA-256.
 
 
 ### Sottotitoli multilingua

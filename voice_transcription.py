@@ -17,7 +17,7 @@ from youtube_job import memory_pressure, stop_job
 MAX_BYTES = 8 * 1024 * 1024
 MAX_SECONDS = 180
 log = logging.getLogger(__name__)
-VOICE_MODEL = os.getenv('WHISPER_VOICE_MODEL', '/opt/whisper/ggml-small-q5_1.bin')
+VOICE_MODEL = os.getenv('WHISPER_VOICE_MODEL', '/opt/whisper/ggml-small-q4_1.bin')
 
 
 def format_transcript(text):
@@ -117,7 +117,7 @@ def transcript_text(data, windows):
     return text if len(text) <= 15000 else ''
 
 
-def transcribe(source):
+def transcribe(source, use_base=False):
     if not all(Path(p).is_file() for p in (CLI, MODEL, VOICE_MODEL, VAD_MODEL)):
         return {'success': False, 'reason': 'model_unavailable'}
     directory = Path(source).parent
@@ -132,7 +132,7 @@ def transcribe(source):
                     '-c:a', 'pcm_s16le', str(audio)], check=True, capture_output=True, timeout=25)
     command = [CLI, '-m', MODEL, '-t', '1', '-ng', '-bo', '1', '-bs', '1', '-nf']
     # Avoid timing out on long notes while retaining Small for short/medium ones.
-    selected_model = VOICE_MODEL if duration <= 90 else MULTILINGUAL_MODEL
+    selected_model = VOICE_MODEL if duration <= 90 and not use_base else MULTILINGUAL_MODEL
     recognition = [CLI, '-m', selected_model, '-t', '1', '-ng', '-fa', '-bo', '1', '-bs', '1', '-nf']
     # Decode bounded chunks in separate processes: long VAD buffers otherwise
     # exceed the free worker's RAM. Nothing is returned before every chunk passes.
@@ -178,11 +178,24 @@ def transcribe(source):
 
 def run_voice_job(source, timeout=900):
     """Shares the downloader's serial queue; never loads a model in the bot."""
+    started = time.monotonic()
+    result = _voice_attempt(source, min(timeout, 600))
+    remaining = timeout - (time.monotonic() - started)
+    if (not result.get('success') and result.get('reason') in
+            ('resource_limit', 'recognition_timeout', 'recognition_failed') and remaining >= 90):
+        # The first process group is already stopped: models never overlap.
+        log.info('Voice retry with lighter model: reason=%s', result['reason'])
+        result = _voice_attempt(source, remaining, use_base=True)
+    return result
+
+
+def _voice_attempt(source, timeout, use_base=False):
     if memory_pressure():
         return {'success': False, 'reason': 'resource_limit'}
     report = Path(source).parent / 'voice_result.json'
+    report.unlink(missing_ok=True)
     started = time.monotonic()
-    proc = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), str(source)],
+    proc = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), str(source)] + (['--base'] if use_base else []),
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                             start_new_session=os.name == 'posix')
     try:
@@ -205,7 +218,7 @@ def run_voice_job(source, timeout=900):
 
 if __name__ == '__main__':
     try:
-        result = transcribe(sys.argv[1])
+        result = transcribe(sys.argv[1], use_base='--base' in sys.argv[2:])
     except subprocess.TimeoutExpired:
         result = {'success': False, 'reason': 'recognition_timeout'}
     except Exception:
