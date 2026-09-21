@@ -30,6 +30,8 @@ RUN curl -fL --retry 3 https://argos-net.com/v1/translate-en_it-1_0.argosmodel -
  && unzip /tmp/en_it.zip 'en_it/model/*' 'en_it/sentencepiece.model' 'en_it/metadata.json' 'en_it/README.md' -d /opt/translation \
  && rm /tmp/en_it.zip
 COPY --from=speech-build /opt/whisper /opt/whisper
+RUN curl -fL --retry 3 https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q5_1.bin -o /opt/whisper/ggml-small-q5_1.bin \
+ && echo 'ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb  /opt/whisper/ggml-small-q5_1.bin' | sha256sum -c -
 RUN curl -fL --retry 3 https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base-q5_1.bin -o /opt/whisper/ggml-base-q5_1.bin \
  && echo '422f1ae452ade6f30a004d7e5c6a43195e4433bc370bf23fac9cc591f01a8898  /opt/whisper/ggml-base-q5_1.bin' | sha256sum -c -
 RUN curl -fL --retry 3 https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin -o /opt/whisper/ggml-silero-v5.1.2.bin \

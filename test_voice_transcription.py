@@ -6,10 +6,37 @@ from pathlib import Path
 from unittest.mock import patch
 from aiohttp.test_utils import TestClient, TestServer
 from downloader_service import build_app
-from voice_transcription import italian_detection, transcript_text, run_voice_job, transcribe
+from voice_transcription import (italian_detection, transcript_text, run_voice_job, transcribe,
+                                 format_transcript, audio_chunks)
 
 
 class VoiceTests(unittest.TestCase):
+    def test_proofreading_keeps_facts_and_adds_readable_paragraphs(self):
+        text = "  ciao ,perchè non vieni?qual'è il problema? Un pò di tempo. "
+        self.assertEqual(format_transcript(text), "Ciao, perché non vieni? Qual è il problema? Un po’ di tempo.")
+        facts = "Alle 9.30 costa 19,90 euro, non 90 euro. Il sito è https://esempio.it/a e si chiama Dott. Rossi."
+        self.assertEqual(format_transcript(facts), facts)
+        long = 'Questa è una frase completa con informazioni da conservare. ' * 12
+        formatted = format_transcript(long)
+        self.assertIn('\n\n', formatted)
+        self.assertEqual(formatted.replace('\n\n', ' '), long.strip())
+        self.assertEqual(format_transcript(''), '')
+
+    def test_chunk_boundaries_keep_every_sample_and_prefer_a_pause(self):
+        import io
+        import wave
+        frames = b'\x10\x27' * (25 * 16000) + b'\x00\x00' * 16000 + b'\x20\x27' * (40 * 16000)
+        data = io.BytesIO()
+        with wave.open(data, 'wb') as wav:
+            wav.setparams((1, 2, 16000, 0, 'NONE', 'not compressed'))
+            wav.writeframes(frames)
+        data.seek(0)
+        with wave.open(data, 'rb') as wav:
+            chunks = list(audio_chunks(wav))
+        self.assertEqual(b''.join(chunks), frames)
+        self.assertTrue(all(len(chunk) <= 30 * 16000 * 2 for chunk in chunks))
+        self.assertAlmostEqual(len(chunks[0]) / 32000, 25.5, places=1)
+
     def test_only_confident_italian(self):
         self.assertTrue(italian_detection('auto-detected language: it (p = 0.96)'))
         for text in ('auto-detected language: en (p = 0.99)',
@@ -45,7 +72,7 @@ class VoiceTests(unittest.TestCase):
                 if command[0] == 'ffmpeg':
                     with wave.open(command[-1], 'wb') as out:
                         out.setparams((1, 2, 16000, 0, 'NONE', 'not compressed'))
-                        out.writeframes(b'\x01\x00' * 30 * 16000 + b'\x02\x00' * 5 * 16000)
+                        out.writeframes(b'\x10\x27' * 30 * 16000 + b'\x20\x27' * 5 * 16000)
                     return SimpleNamespace()
                 if '-dl' not in command:
                     import json
@@ -56,14 +83,14 @@ class VoiceTests(unittest.TestCase):
                             {'offsets': {'from': 0, 'to': 1000}, 'text': 'Ciao ragazzi.'}]}))
                     return SimpleNamespace(stderr='VAD segment 0: start = 0.00, end = 1.00')
                 with wave.open(command[command.index('-f') + 1], 'rb') as wav:
-                    samples.append(wav.readframes(1))
+                    samples.append(wav.readframes(wav.getnframes())[-2:])
                 lang = 'it' if len(samples) == 1 else 'en'
                 return SimpleNamespace(stderr=f'auto-detected language: {lang} (p = 0.99)')
             with patch('voice_transcription.Path.is_file', return_value=True), \
                  patch('voice_transcription.subprocess.check_output', return_value=b'{"format":{"duration":"35"},"streams":[{"codec_type":"audio"}]}'), \
                  patch('voice_transcription.subprocess.run', side_effect=fake_run):
                 self.assertEqual(transcribe(str(source))['skipped'], 'not_italian')
-            self.assertEqual(samples, [b'\x01\x00', b'\x02\x00'])
+            self.assertEqual(samples, [b'\x10\x27', b'\x20\x27'])
 
 
 class VoiceApiTests(unittest.IsolatedAsyncioTestCase):
