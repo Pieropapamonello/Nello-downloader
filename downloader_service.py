@@ -107,7 +107,7 @@ def build_app(token=None, downloader_factory=None):
         job = jobs.get(request.match_info['ident'])
         if not job:
             raise web.HTTPNotFound()
-        return web.json_response({k: job[k] for k in ('state', 'result') if k in job})
+        return web.json_response({k: job[k] for k in ('state', 'result', 'progress') if k in job})
 
     async def submit_voice(request):
         caption_upload = request.path.startswith('/subtitle-jobs/')
@@ -182,7 +182,11 @@ def build_app(token=None, downloader_factory=None):
             try:
                 if body.get('kind') == 'voice':
                     try:
-                        job['result'] = await asyncio.to_thread(run_voice_job, os.path.join(directory.name, 'input.audio'))
+                        loop = asyncio.get_running_loop()
+                        def progress(value, current_job=job):
+                            if value.get('language') == 'it':
+                                loop.call_soon_threadsafe(current_job.__setitem__, 'progress', value)
+                        job['result'] = await asyncio.to_thread(run_voice_job, os.path.join(directory.name, 'input.audio'), on_progress=progress)
                     finally:
                         directory.cleanup()
                     continue

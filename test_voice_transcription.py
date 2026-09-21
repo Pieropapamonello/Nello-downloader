@@ -102,6 +102,7 @@ class VoiceTests(unittest.TestCase):
                  patch('voice_transcription.subprocess.check_output', return_value=b'{"format":{"duration":"35"},"streams":[{"codec_type":"audio"}]}'), \
                  patch('voice_transcription.subprocess.run', side_effect=fake_run):
                 self.assertEqual(transcribe(str(source))['skipped'], 'not_italian')
+                self.assertFalse((Path(directory) / 'voice_progress.json').exists())
             self.assertEqual(samples, [b'\x10\x27', b'\x20\x27'])
 
 
@@ -110,9 +111,10 @@ class VoiceApiTests(unittest.IsolatedAsyncioTestCase):
         token = 'test-only-' * 4
         headers = {'Authorization': 'Bearer ' + token}
         paths = []
-        def fake(source):
+        def fake(source, on_progress=None):
             paths.append(Path(source))
             self.assertEqual(Path(source).read_bytes(), b'voice bytes')
+            on_progress({'language': 'it', 'text': 'Ciao', 'completed': 1, 'total': 2})
             return {'success': True, 'language': 'it', 'text': 'Ciao ragazzi.'}
         async with TestClient(TestServer(build_app(token))) as client:
             ident = str(uuid.uuid4())
@@ -127,6 +129,7 @@ class VoiceApiTests(unittest.IsolatedAsyncioTestCase):
                         break
                     await asyncio.sleep(.01)
                 self.assertEqual(result['result']['text'], 'Ciao ragazzi.')
+                self.assertEqual(result['progress']['completed'], 1)
                 self.assertFalse(paths[0].exists())
                 self.assertEqual((await client.post('/voice-jobs/' + ident, data=b'voice bytes', headers=headers)).status, 202)
                 self.assertEqual(len(paths), 1)

@@ -117,6 +117,16 @@ def transcript_text(data, windows):
     return text if len(text) <= 15000 else ''
 
 
+def publish_progress(directory, texts, completed, total):
+    text = format_transcript(' '.join(texts))
+    if len(text) > 15000:
+        return
+    temporary = directory / 'voice_progress.tmp'
+    temporary.write_text(json.dumps({'language': 'it', 'text': text,
+                                    'completed': completed, 'total': total}), encoding='utf-8')
+    temporary.replace(directory / 'voice_progress.json')
+
+
 def transcribe(source, use_base=False):
     if not all(Path(p).is_file() for p in (CLI, MODEL, VOICE_MODEL, VAD_MODEL)):
         return {'success': False, 'reason': 'model_unavailable'}
@@ -134,12 +144,12 @@ def transcribe(source, use_base=False):
     # Avoid timing out on long notes while retaining Small for short/medium ones.
     selected_model = VOICE_MODEL if duration <= 90 and not use_base else MULTILINGUAL_MODEL
     recognition = [CLI, '-m', selected_model, '-t', '1', '-ng', '-fa', '-bo', '1', '-bs', '1', '-nf']
-    # Decode bounded chunks in separate processes: long VAD buffers otherwise
-    # exceed the free worker's RAM. Nothing is returned before every chunk passes.
-    texts = []
+    # Validate ALL chunks before publishing any Italian text. A foreign-language
+    # ending must not leak a partial transcript of a mixed-language voice note.
+    texts, parts = [], []
     with wave.open(str(audio), 'rb') as original:
-        for frames in audio_chunks(original):
-            sample = directory / 'language_sample.wav'
+        for index, frames in enumerate(audio_chunks(original)):
+            sample = directory / f'language_sample_{index}.wav'
             with wave.open(str(sample), 'wb') as output:
                 output.setparams(original.getparams())
                 output.writeframes(frames)
@@ -161,31 +171,35 @@ def transcribe(source, use_base=False):
                 reason = 'not_italian' if language and language != 'it' and confidence >= .55 else 'uncertain_language'
                 return {'success': True, 'skipped': reason, 'detected_language': language,
                         'confidence': round(confidence, 3)}
-            output = directory / 'voice_transcript'
-            vad = ['--vad', '-vm', VAD_MODEL, '-vsd', '500', '-vp', '50'] if seconds > 8 else []
-            context = min(1500, max(256, math.ceil(seconds * 50 / 64) * 64))
-            result = subprocess.run(recognition + ['-f', str(sample), '-l', 'it', '-ac', str(context)] + vad + ['-sns', '-oj', '-of', str(output)],
-                                    check=True, capture_output=True, text=True, encoding='utf-8', timeout=240)
-            data = json.loads(output.with_suffix('.json').read_text(encoding='utf-8'))
-            windows = speech_windows(result.stderr) if vad else [(0, round(seconds * 1000))]
-            text = transcript_text(data, windows)
-            if text:
-                texts.append(text)
+            parts.append((sample, seconds))
+    frames = b''  # Do not retain the last PCM buffer during model inference.
+    for index, (sample, seconds) in enumerate(parts):
+        output = directory / 'voice_transcript'
+        vad = ['--vad', '-vm', VAD_MODEL, '-vsd', '500', '-vp', '50'] if seconds > 8 else []
+        context = min(1500, max(256, math.ceil(seconds * 50 / 64) * 64))
+        result = subprocess.run(recognition + ['-f', str(sample), '-l', 'it', '-ac', str(context)] + vad + ['-sns', '-oj', '-of', str(output)],
+                                check=True, capture_output=True, text=True, encoding='utf-8', timeout=240)
+        data = json.loads(output.with_suffix('.json').read_text(encoding='utf-8'))
+        windows = speech_windows(result.stderr) if vad else [(0, round(seconds * 1000))]
+        text = transcript_text(data, windows)
+        if text:
+            texts.append(text)
+        publish_progress(directory, texts, index + 1, len(parts))
     text = format_transcript(' '.join(texts))
     return ({'success': True, 'language': 'it', 'text': text} if text and len(text) <= 15000 else
             {'success': True, 'skipped': 'no_clear_speech'})
 
 
-def run_voice_job(source, timeout=900):
+def run_voice_job(source, timeout=900, on_progress=None):
     """Shares the downloader's serial queue; never loads a model in the bot."""
     started = time.monotonic()
-    result = _voice_attempt(source, min(timeout, 600))
+    result = _voice_attempt(source, min(timeout, 600), on_progress=on_progress)
     remaining = timeout - (time.monotonic() - started)
     if (not result.get('success') and result.get('reason') in
             ('resource_limit', 'recognition_timeout', 'recognition_failed') and remaining >= 90):
         # The first process group is already stopped: models never overlap.
         log.info('Voice retry with lighter model: reason=%s', result['reason'])
-        result = _voice_attempt(source, remaining, use_base=True)
+        result = _voice_attempt(source, remaining, use_base=True, on_progress=on_progress)
     remaining = timeout - (time.monotonic() - started)
     if result.get('text') and result.get('language') == 'it' and remaining >= 5:
         from voice_proofreading import proofread
@@ -193,11 +207,15 @@ def run_voice_job(source, timeout=900):
     return result
 
 
-def _voice_attempt(source, timeout, use_base=False):
+def _voice_attempt(source, timeout, use_base=False, on_progress=None):
     if memory_pressure():
         return {'success': False, 'reason': 'resource_limit'}
     report = Path(source).parent / 'voice_result.json'
     report.unlink(missing_ok=True)
+    progress = report.with_name('voice_progress.json')
+    progress.unlink(missing_ok=True)
+    last_progress = None
+    next_progress_check = 0
     started = time.monotonic()
     proc = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), str(source)] + (['--base'] if use_base else []),
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -206,6 +224,18 @@ def _voice_attempt(source, timeout, use_base=False):
         while proc.poll() is None:
             if memory_pressure() or time.monotonic() - started > timeout:
                 return {'success': False, 'reason': 'resource_limit'}
+            if on_progress and time.monotonic() >= next_progress_check and progress.is_file():
+                next_progress_check = time.monotonic() + 1
+                try:
+                    value = json.loads(progress.read_text(encoding='utf-8'))
+                    if value != last_progress:
+                        last_progress = value
+                        try:
+                            on_progress(value)
+                        except Exception as exc:
+                            log.warning('Voice progress unavailable: %s', type(exc).__name__)
+                except (OSError, ValueError):
+                    pass  # Atomic replacement can race polling on Windows.
             time.sleep(.1)
         if proc.returncode != 0 or not report.is_file():
             return {'success': False, 'reason': 'recognition_failed'}
