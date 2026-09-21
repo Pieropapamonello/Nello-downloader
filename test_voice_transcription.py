@@ -25,7 +25,7 @@ class VoiceTests(unittest.TestCase):
     def test_chunk_boundaries_keep_every_sample_and_prefer_a_pause(self):
         import io
         import wave
-        frames = b'\x10\x27' * (25 * 16000) + b'\x00\x00' * 16000 + b'\x20\x27' * (40 * 16000)
+        frames = b'\x10\x27' * (17 * 16000) + b'\x00\x00' * 16000 + b'\x20\x27' * (48 * 16000)
         data = io.BytesIO()
         with wave.open(data, 'wb') as wav:
             wav.setparams((1, 2, 16000, 0, 'NONE', 'not compressed'))
@@ -34,8 +34,8 @@ class VoiceTests(unittest.TestCase):
         with wave.open(data, 'rb') as wav:
             chunks = list(audio_chunks(wav))
         self.assertEqual(b''.join(chunks), frames)
-        self.assertTrue(all(len(chunk) <= 30 * 16000 * 2 for chunk in chunks))
-        self.assertAlmostEqual(len(chunks[0]) / 32000, 25.5, places=1)
+        self.assertTrue(all(len(chunk) <= 20 * 16000 * 2 for chunk in chunks))
+        self.assertAlmostEqual(len(chunks[0]) / 32000, 17.5, places=1)
 
     def test_only_confident_italian(self):
         self.assertTrue(italian_detection('auto-detected language: it (p = 0.96)'))

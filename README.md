@@ -112,8 +112,10 @@ Telegram, WhatsApp e Discord rispondono ai messaggi audio riconosciuti come ital
 
 Il riconoscitore Whisper locale usa la coda seriale del downloader e non richiede nuove chiavi o servizi a pagamento. Limiti per Render Free: 3 minuti e 8 MB per audio; massimo 3 richieste vocali contemporaneamente in attesa dal bot. I file temporanei vengono eliminati dopo il riconoscimento, senza salvare il testo nei log o nella cache dei social. Serve la configurazione DOWNLOADER_URL/DOWNLOADER_TOKEN gia usata per i video. La precisione dipende dalla chiarezza della voce e dal rilevamento della lingua.
 
-I vocali usano il modello multilingua Small Q5 con flash attention, un thread e
-processi separati per blocchi di massimo 30 secondi. I tagli preferiscono le pause
+I vocali fino a 90 secondi usano Small Q5; quelli piu lunghi usano Base Q5
+per contenere i tempi. Entrambi usano flash attention, un thread e processi
+separati per blocchi di massimo 20 secondi, con contesto audio proporzionato
+alla durata del blocco e un limite complessivo di 900 secondi. I tagli preferiscono le pause
 e non lasciano un frammento finale inferiore a 8 secondi. Tiny controlla la lingua;
 Base verifica i casi incerti prima di consentire una trascrizione italiana.
 Il testo viene normalizzato con spazi, maiuscole iniziali, paragrafi e correzioni
@@ -128,6 +130,6 @@ Il modello piu accurato puo impiegare alcuni minuti su Render Free.
 
 I video vengono controllati anche per scritte incorporate, compresi i video muti. Il testo straniero riconosciuto viene tradotto in italiano; scritte gia italiane eviteranno una seconda sovrapposizione. Il parlato non italiano usa Whisper e traduzione gratuita. Inglese: traduttore locale; altre lingue: provider pubblici gratuiti, soggetti a disponibilita e quote. Nessuna API a pagamento.
 
-Su Render Free il riconoscimento audio e visivo e limitato a 90 secondi; le tracce sottotitoli native a 180 secondi. OCR, lingua o traduzione incerti e limiti di risorse conservano il video originale. I vocali italiani restano separati: massimo 180 secondi, elaborati in blocchi di 30 secondi; nessuna traduzione dei vocali stranieri.
+Su Render Free il riconoscimento audio e visivo e limitato a 90 secondi; le tracce sottotitoli native a 180 secondi. OCR, lingua o traduzione incerti e limiti di risorse conservano il video originale. I vocali italiani restano separati: massimo 180 secondi, elaborati in blocchi di massimo 20 secondi; nessuna traduzione dei vocali stranieri.
 
 Il servizio autenticato accetta anche MP4 gia scaricati tramite POST /subtitle-jobs/{uuid} (body binario, massimo 20 MB), nella stessa coda e con le stesse API di stato, file e cancellazione degli altri lavori.

@@ -8,6 +8,7 @@ import sys
 import time
 import os
 import wave
+import math
 from array import array
 
 from speech_subtitles import CLI, MODEL, MULTILINGUAL_MODEL, VAD_MODEL, speech_windows, respect_pauses
@@ -56,33 +57,33 @@ def format_transcript(text):
 
 
 def audio_chunks(original):
-    """Cut at quiet boundaries, keeping every sample and at most 30 seconds."""
+    """Cut at quiet boundaries, keeping every sample and at most 20 seconds."""
     rate, width = original.getframerate(), original.getsampwidth()
     remaining = original.readframes(MAX_SECONDS * rate)
     while remaining:
-        if len(remaining) <= 30 * rate * width:
+        if len(remaining) <= 20 * rate * width:
             yield remaining
             return
-        # Prefer pauses near 26 seconds; avoid cutting a word at an arbitrary 30s.
-        samples = array('h', remaining[:30 * rate * width])
+        # Short encoder windows reduce CPU work as well as memory on Render Free.
+        samples = array('h', remaining[:20 * rate * width])
         if sys.byteorder != 'little':
             samples.byteswap()
         quiet, candidates = None, []
         step = rate // 50
-        for start in range(18 * rate, 30 * rate, step):
+        for start in range(12 * rate, 20 * rate, step):
             block = samples[start:start + step]
             silent = sum(value * value for value in block) / len(block) < 580 ** 2
             if silent and quiet is None:
                 quiet = start
-            if quiet is not None and (not silent or start + step >= 30 * rate):
+            if quiet is not None and (not silent or start + step >= 20 * rate):
                 end = start if not silent else start + step
                 if end - quiet >= .18 * rate:
                     candidates.append((quiet + end) // 2)
                 quiet = None
         # A tiny leftover often loses the language/context of the conversation.
-        maximum = min(30 * rate, len(remaining) // width - 8 * rate)
+        maximum = min(20 * rate, len(remaining) // width - 8 * rate)
         candidates = [n for n in candidates if n <= maximum]
-        end = min(candidates, key=lambda n: abs(n - 26 * rate)) if candidates else maximum
+        end = min(candidates, key=lambda n: abs(n - 18 * rate)) if candidates else maximum
         yield remaining[:end * width]
         remaining = remaining[end * width:]
 
@@ -130,7 +131,9 @@ def transcribe(source):
                     '-vn', '-t', str(MAX_SECONDS + 1), '-ac', '1', '-ar', '16000',
                     '-c:a', 'pcm_s16le', str(audio)], check=True, capture_output=True, timeout=25)
     command = [CLI, '-m', MODEL, '-t', '1', '-ng', '-bo', '1', '-bs', '1', '-nf']
-    recognition = [CLI, '-m', VOICE_MODEL, '-t', '1', '-ng', '-fa', '-bo', '1', '-bs', '1', '-nf']
+    # Avoid timing out on long notes while retaining Small for short/medium ones.
+    selected_model = VOICE_MODEL if duration <= 90 else MULTILINGUAL_MODEL
+    recognition = [CLI, '-m', selected_model, '-t', '1', '-ng', '-fa', '-bo', '1', '-bs', '1', '-nf']
     # Decode bounded chunks in separate processes: long VAD buffers otherwise
     # exceed the free worker's RAM. Nothing is returned before every chunk passes.
     texts = []
@@ -160,7 +163,8 @@ def transcribe(source):
                         'confidence': round(confidence, 3)}
             output = directory / 'voice_transcript'
             vad = ['--vad', '-vm', VAD_MODEL, '-vsd', '500', '-vp', '50'] if seconds > 8 else []
-            result = subprocess.run(recognition + ['-f', str(sample), '-l', 'it'] + vad + ['-sns', '-oj', '-of', str(output)],
+            context = min(1500, max(256, math.ceil(seconds * 50 / 64) * 64))
+            result = subprocess.run(recognition + ['-f', str(sample), '-l', 'it', '-ac', str(context)] + vad + ['-sns', '-oj', '-of', str(output)],
                                     check=True, capture_output=True, text=True, encoding='utf-8', timeout=240)
             data = json.loads(output.with_suffix('.json').read_text(encoding='utf-8'))
             windows = speech_windows(result.stderr) if vad else [(0, round(seconds * 1000))]
@@ -172,7 +176,7 @@ def transcribe(source):
             {'success': True, 'skipped': 'no_clear_speech'})
 
 
-def run_voice_job(source, timeout=600):
+def run_voice_job(source, timeout=900):
     """Shares the downloader's serial queue; never loads a model in the bot."""
     if memory_pressure():
         return {'success': False, 'reason': 'resource_limit'}
@@ -202,6 +206,8 @@ def run_voice_job(source, timeout=600):
 if __name__ == '__main__':
     try:
         result = transcribe(sys.argv[1])
+    except subprocess.TimeoutExpired:
+        result = {'success': False, 'reason': 'recognition_timeout'}
     except Exception:
         result = {'success': False, 'reason': 'recognition_failed'}
     (Path(sys.argv[1]).parent / 'voice_result.json').write_text(json.dumps(result), encoding='utf-8')
