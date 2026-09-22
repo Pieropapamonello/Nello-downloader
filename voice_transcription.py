@@ -98,6 +98,17 @@ def italian_detection(output, seconds=30):
     return language == 'it' and confidence >= (.40 if seconds <= 8 else .85)
 
 
+def repetition_loop(text):
+    # Ignore punctuation and segment boundaries, but preserve ordinary emphasis.
+    words = re.findall(r"\w+", text.casefold())
+    for width in range(3, min(32, len(words) // 4) + 1):
+        for start in range(len(words) - width * 4 + 1):
+            phrase = words[start:start + width]
+            if all(words[start + width * n:start + width * (n + 1)] == phrase for n in range(1, 4)):
+                return True
+    return False
+
+
 def transcript_text(data, windows):
     if data.get('result', {}).get('language') != 'it':
         return ''
@@ -182,6 +193,18 @@ def transcribe(source, use_base=False):
         data = json.loads(output.with_suffix('.json').read_text(encoding='utf-8'))
         windows = speech_windows(result.stderr) if vad else [(0, round(seconds * 1000))]
         text = transcript_text(data, windows)
+        if repetition_loop(text):
+            log.warning('Voice repetition detected: chunk=%s; retrying only this chunk', index)
+            retry = list(recognition)
+            retry[retry.index('-m') + 1] = MULTILINGUAL_MODEL
+            # A fresh decode without VAD/context reduction avoids repeating the
+            # same faulty decode; the supervisor still enforces memory/time caps.
+            result = subprocess.run(retry + ['-f', str(sample), '-l', 'it', '-sns', '-oj', '-of', str(output)],
+                                    check=True, capture_output=True, text=True, encoding='utf-8', timeout=180)
+            data = json.loads(output.with_suffix('.json').read_text(encoding='utf-8'))
+            text = transcript_text(data, windows)
+            if not text or repetition_loop(text):
+                text = '[Passaggio non riconosciuto con sicurezza.]'
         if text:
             texts.append(text)
         publish_progress(directory, texts, index + 1, len(parts))

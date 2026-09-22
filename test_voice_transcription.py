@@ -7,10 +7,48 @@ from unittest.mock import patch
 from aiohttp.test_utils import TestClient, TestServer
 from downloader_service import build_app
 from voice_transcription import (italian_detection, transcript_text, run_voice_job, transcribe,
-                                 format_transcript, audio_chunks)
+                                 format_transcript, audio_chunks, repetition_loop)
 
 
 class VoiceTests(unittest.TestCase):
+    def test_repeated_chunk_is_retried_before_progress_and_never_published(self):
+        import json
+        import wave
+        from types import SimpleNamespace
+        loop = 'che è stato il mio primo ' * 20
+        for recovered in ('Domani passo alle nove.', loop):
+            with self.subTest(recovered=recovered[:20]), tempfile.TemporaryDirectory() as directory:
+                decodes = []
+                def fake_run(command, **kwargs):
+                    if command[0] == 'ffmpeg':
+                        with wave.open(command[-1], 'wb') as out:
+                            out.setparams((1, 2, 16000, 0, 'NONE', 'not compressed'))
+                            out.writeframes(b'\x10\x27' * 4 * 16000)
+                    elif '-dl' in command:
+                        return SimpleNamespace(stderr='auto-detected language: it (p = 0.99)')
+                    else:
+                        decodes.append(command)
+                        self.assertFalse((Path(directory) / 'voice_progress.json').exists())
+                        Path(command[command.index('-of') + 1] + '.json').write_text(json.dumps({
+                            'result': {'language': 'it'}, 'transcription': [
+                                {'offsets': {'from': 0, 'to': 4000}, 'text': loop if len(decodes) == 1 else recovered}]}))
+                    return SimpleNamespace(stderr='')
+                with patch('voice_transcription.Path.is_file', return_value=True), \
+                     patch('voice_transcription.subprocess.check_output', return_value=b'{"format":{"duration":"4"},"streams":[{"codec_type":"audio"}]}'), \
+                     patch('voice_transcription.subprocess.run', side_effect=fake_run):
+                    result = transcribe(str(Path(directory) / 'input.audio'))
+                self.assertEqual(len(decodes), 2)
+                self.assertNotIn('che è stato il mio primo', result['text'])
+                self.assertIn('non riconosciuto' if recovered == loop else recovered, result['text'])
+                progress = json.loads((Path(directory) / 'voice_progress.json').read_text())
+                self.assertNotIn('che è stato il mio primo', progress['text'])
+
+    def test_repetition_across_punctuation_is_rejected_without_removing_normal_emphasis(self):
+        self.assertTrue(repetition_loop('Ciao. ' + 'Il mio primo che è stato ' * 20 + 'poi torno.'))
+        self.assertTrue(repetition_loop('Che è stato il mio primo. ' * 5))
+        self.assertFalse(repetition_loop('Prova prova, prova come stai?'))
+        self.assertFalse(repetition_loop('Alle nove e mezza passa il pulmino. Alle nove e mezza devo lavorare.'))
+
     def test_proofreading_keeps_facts_and_adds_readable_paragraphs(self):
         text = "  ciao ,perchè non vieni?qual'è il problema? Un pò di tempo. "
         self.assertEqual(format_transcript(text), "Ciao, perché non vieni? Qual è il problema? Un po’ di tempo.")
